@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1060" viewBox="0 0 1400 1060">
+<rect width="1400" height="1060" fill="#f5f7fb"/>
+<style>text{font-family:DejaVu Sans,sans-serif;fill:#172437}.title{font-size:30px;font-weight:700}.heading{font-size:22px;font-weight:700}.label{font-size:18px}.small{font-size:15px}.pin{font-size:17px;font-weight:700}.note{font-size:16px}</style>
+<text x="36" y="49" class="title">BEAVER BATTLE · ONE CONTROLLER</text>
+<text x="36" y="79" class="label">9V battery + 5V / 3.3V converter + ESP32 DevKit V1 + IRLZ44N</text>
+<rect x="30" y="104" width="1340" height="304" rx="12" fill="#ffffff" stroke="#cdd6e4" stroke-width="2"/>
+<text x="52" y="139" class="heading">1  POWER DISTRIBUTION</text>
+<rect x="54" y="169" width="160" height="150" rx="12" fill="#edf2fa" stroke="#cdd6e4" stroke-width="2"/>
+<text x="75" y="208" class="pin">9V BATTERY</text>
+<text x="188" y="238" class="pin">+</text>
+<text x="188" y="283" class="pin">−</text>
+<rect x="316" y="169" width="230" height="150" rx="12" fill="#edf2fa" stroke="#cdd6e4" stroke-width="2"/>
+<text x="337" y="201" class="pin">CONVERTER</text>
+<text x="337" y="238" class="small">IN+</text>
+<text x="337" y="283" class="small">IN−</text>
+<text x="477" y="238" class="pin">5V</text>
+<text x="468" y="277" class="small">GND</text>
+<text x="350" y="302" class="small">3.3V: leave unused</text>
+<polyline points="214,233 316,233" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="214,278 316,278" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="546,233 656,233 656,190 837,190" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="656,233 656,267 837,267" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="656,267 656,344 837,344" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="656" cy="233" r="5" fill="#cf354a"/>
+<circle cx="656" cy="267" r="5" fill="#cf354a"/>
+<text x="590" y="215" class="pin" style="fill:#cf354a">+5V</text>
+<rect x="837" y="158" width="494" height="65" rx="12" fill="#f0f6ff" stroke="#cdd6e4" stroke-width="2"/>
+<text x="858" y="185" class="pin">ESP32 → VIN / 5V input*</text>
+<text x="858" y="208" class="small">Use the board’s verified 5V input; never 3V3.</text>
+<rect x="837" y="236" width="494" height="65" rx="12" fill="#fff7eb" stroke="#cdd6e4" stroke-width="2"/>
+<text x="858" y="263" class="pin">LASER → current limiter → laser +</text>
+<text x="858" y="286" class="small">Detailed switch wiring below.</text>
+<rect x="837" y="314" width="494" height="65" rx="12" fill="#f0faf7" stroke="#cdd6e4" stroke-width="2"/>
+<text x="858" y="340" class="pin">SERVO → power +, if rated for 5V</text>
+<text x="858" y="363" class="small">Connect only after checking converter current capacity.</text>
+<polyline points="546,272 588,272 588,335" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="588,335 588,348" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="571,348 605,348" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="577,355 599,355" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="583,362 593,362" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<text x="54" y="378" class="small">Battery −, converter GND, ESP32 GND, servo GND, and MOSFET source share GND.</text>
+<rect x="30" y="430" width="764" height="524" rx="12" fill="#ffffff" stroke="#cdd6e4" stroke-width="2"/>
+<text x="52" y="466" class="heading">2  LASER SWITCH</text>
+<text x="55" y="506" class="pin" style="fill:#cf354a">+5V from converter</text>
+<polyline points="278,500 329,500" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<rect x="329" y="481" width="181" height="38" rx="2" fill="#fff9ed" stroke="#c48730" stroke-width="2"/>
+<text x="339" y="506.0" class="pin">330Ω · ¼W</text>
+<polyline points="510,500 570,500" fill="none" stroke="#cf354a" stroke-width="3" stroke-linejoin="round"/>
+<rect x="570" y="477" width="173" height="73" rx="12" fill="#fff7eb" stroke="#cdd6e4" stroke-width="2"/>
+<text x="595" y="507" class="pin">+   LASER</text>
+<text x="647" y="535" class="pin">−</text>
+<polyline points="657,550 657,597" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<rect x="567" y="597" width="180" height="154" rx="12" fill="#edf2fa" stroke="#cdd6e4" stroke-width="2"/>
+<text x="586" y="674" class="pin">IRLZ44N</text>
+<text x="624" y="623" class="small">DRAIN</text>
+<text x="577" y="705" class="small">GATE</text>
+<text x="621" y="734" class="small">SOURCE</text>
+<polyline points="657,751 657,808" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="657,808 657,821" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="640,821 674,821" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="646,828 668,828" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="652,835 662,835" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<text x="52" y="704" class="pin" style="fill:#14786c">ESP32 GPIO25</text>
+<polyline points="229,699 268,699" fill="none" stroke="#14786c" stroke-width="3" stroke-linejoin="round"/>
+<rect x="268" y="680" width="100" height="38" rx="2" fill="#fff9ed" stroke="#c48730" stroke-width="2"/>
+<text x="278" y="705.0" class="pin">330Ω</text>
+<polyline points="368,699 480,699 567,699" fill="none" stroke="#14786c" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="480" cy="699" r="5" fill="#14786c"/>
+<polyline points="480,699 480,744" fill="none" stroke="#14786c" stroke-width="3" stroke-linejoin="round"/>
+<rect x="431" y="744" width="99" height="38" rx="2" fill="#fff9ed" stroke="#c48730" stroke-width="2"/>
+<text x="441" y="769.0" class="pin">100kΩ</text>
+<polyline points="480,782 480,808" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="480,808 480,821" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="463,821 497,821" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="469,828 491,828" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="475,835 485,835" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<text x="55" y="861" class="small">Two separate 330Ω resistors: one in laser power, one at the gate.</text>
+<text x="55" y="889" class="small">Laser resistor: conservative 5V bench limit; the module may not light.</text>
+<text x="55" y="917" class="small">Laser − connects only to DRAIN, not directly to GND.</text>
+<rect x="816" y="430" width="554" height="524" rx="12" fill="#ffffff" stroke="#cdd6e4" stroke-width="2"/>
+<text x="838" y="466" class="heading">3  BUTTONS + SERVO SIGNAL</text>
+<text x="840" y="533" class="pin" style="fill:#14786c">GPIO27</text>
+<polyline points="931,527 1040,527" fill="none" stroke="#14786c" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="1040" cy="527" r="5" fill="#53657b"/>
+<circle cx="1132" cy="527" r="5" fill="#53657b"/>
+<polyline points="1040,527 1115,501" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1132,527 1289,527 1289,540" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1289,540 1289,553" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1272,553 1306,553" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1278,560 1300,560" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1284,567 1294,567" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<text x="991" y="575" class="small">FIRE / THRUST</text>
+<text x="840" y="641" class="pin" style="fill:#14786c">GPIO32</text>
+<polyline points="931,635 1040,635" fill="none" stroke="#14786c" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="1040" cy="635" r="5" fill="#53657b"/>
+<circle cx="1132" cy="635" r="5" fill="#53657b"/>
+<polyline points="1040,635 1115,609" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1132,635 1289,635 1289,648" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1289,648 1289,661" fill="none" stroke="#53657b" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1272,661 1306,661" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1278,668 1300,668" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1284,675 1294,675" fill="none" stroke="#53657b" stroke-width="2" stroke-linejoin="round"/>
+<text x="991" y="683" class="small">SPECIAL</text>
+<text x="840" y="728" class="small">Normally open switches; internal pull-ups enabled.</text>
+<polyline points="840,749 1342,749" fill="none" stroke="#d6deea" stroke-width="2" stroke-linejoin="round"/>
+<text x="840" y="784" class="pin" style="fill:#14786c">GPIO26 → servo SIGNAL</text>
+<text x="840" y="817" class="label" style="fill:#cf354a">Converter +5V → servo POWER +</text>
+<text x="840" y="850" class="label">Converter GND → servo GND</text>
+<text x="840" y="890" class="small">Power the servo directly from the converter.</text>
+<text x="840" y="919" class="small">Servo pulses remain disabled until calibrated.</text>
+<text x="35" y="985" class="note">* Verify the board input label. Disconnect external VIN/5V power while the laptop’s USB is powering the board.</text>
+<text x="35" y="1015" class="note">Measure the converter output before connecting. Its 5V current rating and the battery must support the servo’s peak load.</text>
+</svg>

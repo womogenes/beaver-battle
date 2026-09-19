@@ -1,6 +1,7 @@
 # Accepted decisions
 
 - Up to three players; ESP32 DevKit V1, classic ESP32/WROOM, 30-pin USB-C boards. All lasers are red. Two buttons per controller.
+- Controller power inventory now includes a 9 V-input converter with 5 V and 3.3 V outputs, plus IRLZ44N MOSFETs. The wiring guide uses its 5 V output and leaves 3.3 V unused. Converter current capacity, exact board power input, laser driver type, and servo current remain to be verified on the bench.
 - Canoes always move forward and steer toward their laser. Near the aim point, or when tracking is ambiguous, retain heading. Ejected beavers are slower and hold fire for thrust.
 - Button 1 fires/thrusts; button 2 activates a power-up. First hit ejects the beaver, second eliminates it. Last survivor wins a round; first to five wins the match. Brief invulnerability prevents one attack consuming both states.
 - All requested destructibles, asteroids, barrels, turrets, death beams, laser weapons, jousters, and proximity mines stay in scope. Physical wall contact causes no damage.
