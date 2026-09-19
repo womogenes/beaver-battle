@@ -55,10 +55,18 @@ def simulated_inputs(config, elapsed, mouse=None, buttons=(False, False), player
 
 
 def simulated_walls(width, height):
+    import cv2
     walls = np.zeros((height, width), dtype=bool)
     walls[int(height * .20):int(height * .37), int(width * .28):int(width * .28) + 8] = True
     walls[int(height * .63):int(height * .80), int(width * .72):int(width * .72) + 8] = True
-    return walls
+    walls[int(height * .42):int(height * .42) + 8, int(width * .57):int(width * .68)] = True
+    walls[int(height * .58):int(height * .58) + 8, int(width * .24):int(width * .35)] = True
+    # Closed outlines, as drawn with a marker: the game fills one as a log and one as a rock.
+    ink = np.zeros((height, width), np.uint8)
+    log = cv2.boxPoints(((width * .37, height * .84), (width * .17, height * .08), -12))
+    cv2.polylines(ink, [log.astype(np.int32)], True, 1, 6)
+    cv2.circle(ink, (int(width * .64), int(height * .19)), int(height * .07), 1, 6)
+    return walls | ink.astype(bool)
 
 
 def menu_choices(mode):
@@ -112,11 +120,23 @@ def main():
     walls = simulated_walls(width, height) if args.simulate else None
     wall_overlay = None
     if args.simulate:
-        wall_overlay = pygame.Surface((width, height))
-        wall_overlay.set_colorkey((0, 0, 0))
-        pixels = pygame.surfarray.pixels3d(wall_overlay)
-        pixels[walls.T] = (85, 120, 135)
-        del pixels
+        import cv2
+        from beaver_battle import sprites
+        wall_overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        count, labels, stats, centers = cv2.connectedComponentsWithStats(walls.astype(np.uint8))
+        for label in range(1, count):
+            x, y, w, h, area = stats[label]
+            if area > .9 * w * h and min(w, h) <= 12:
+                twig = sprites.stick(w, h, seed=label)
+                wall_overlay.blit(twig, twig.get_rect(center=(x + w / 2, y + h / 2)))
+            else:
+                # A drawn outline rather than a straight stroke: show the ink itself, in bark brown.
+                pixels = pygame.surfarray.pixels3d(wall_overlay)
+                opacity = pygame.surfarray.pixels_alpha(wall_overlay)
+                pixels[(labels == label).T] = sprites.BARK_LINE
+                opacity[(labels == label).T] = 255
+                del pixels, opacity
+        game.backdrop = wall_overlay
     snapshot = VisionSnapshot()
     elapsed = 0.0
     frame_count = 0
@@ -270,8 +290,6 @@ def main():
                 text_line('Keep all four markers in view. Hold both buttons to cancel.', height // 2 + 60)
             elif mode in ('game', 'countdown'):
                 game.draw(screen)
-                if wall_overlay is not None:
-                    screen.blit(wall_overlay, (0, 0))
                 if mode == 'countdown':
                     text_line(str(max(1, math.ceil(countdown_until - elapsed))), height // 2 - 32, True)
                     text_line('Hold both buttons to cancel', height - 45)
