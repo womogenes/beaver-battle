@@ -3,7 +3,7 @@
 from dataclasses import FrozenInstanceError, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event
+from threading import Event, Thread
 from time import monotonic, sleep
 from unittest.mock import patch
 
@@ -140,6 +140,84 @@ def check_pipeline():
         assert loaded.process_frame(blank, monotonic()).calibrated
 
 
+def check_cancel_calibration():
+    width, height = 320, 240
+    for previously_calibrated in (False, True):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "calibration.npz"
+            config = {"display": {"width": width, "height": height},
+                      "camera": {"calibration_file": str(path), "wall_persistence": 1}}
+            original = np.array([[1., 0., 3.], [0., 1., 2.], [0., 0., 1.]])
+            if previously_calibrated:
+                save_calibration(path, original, (height, width), (height, width))
+            vision = Vision(config)
+            blank = np.full((height, width, 3), 220, np.uint8)
+            blank[160:175, 120:140] = 15
+            vision.latest = vision.process_frame(blank, monotonic())
+            old_walls = vision.walls
+            saved_bytes = path.read_bytes() if path.exists() else None
+            detecting, release, completed = Event(), Event(), Event()
+
+            def delayed_detection(frame, screen_width, screen_height):
+                detecting.set()
+                assert release.wait(2), "Cancellation must not wait for marker detection"
+                return np.eye(3)
+
+            process = vision.process_frame
+
+            def observed_process(frame, timestamp, identity, ready_since):
+                result = process(frame, timestamp, identity, ready_since)
+                completed.set()
+                return result
+
+            vision.process_frame = observed_process
+            vision.begin_calibration()
+            assert not vision.snapshot().calibrated
+            with patch("beaver_battle.vision.find_calibration", side_effect=delayed_detection):
+                vision.process_thread = Thread(target=vision.process_loop)
+                vision.process_thread.start()
+                try:
+                    with vision.lock:
+                        vision.frame = (monotonic(), calibration_image(width, height))
+                    vision.frame_ready.set()
+                    assert detecting.wait(1)
+                    cancelled_at = monotonic()
+                    vision.cancel_calibration()
+                    vision.cancel_calibration()
+                    assert not vision.calibration_requested.is_set()
+                    assert vision.snapshot().calibrated == previously_calibrated
+                    assert not vision.snapshot().aims
+                    release.set()
+                    assert completed.wait(1)
+                finally:
+                    release.set()
+                    vision.stop()
+            assert vision.latest.calibrated == previously_calibrated
+            assert vision.walls is old_walls
+            if previously_calibrated:
+                assert np.array_equal(vision.matrix, original), "Cancelled result replaced the previous mapping"
+                assert path.read_bytes() == saved_bytes, "Cancelled result overwrote saved calibration"
+                vision.process_frame = process
+                assert process(calibration_image(width, height), cancelled_at + 0.25).walls is old_walls
+                fresh = process(blank, cancelled_at + 0.7)
+                assert fresh.calibrated and fresh.walls is not old_walls, "Wall learning must resume after marker settling"
+            else:
+                assert vision.matrix is None and not path.exists(), "Cancelled first calibration must remain unavailable"
+                assert "Calibration required" in vision.latest.error
+
+            def superseded_detection(frame, screen_width, screen_height):
+                vision.cancel_calibration()
+                vision.begin_calibration()
+                return np.eye(3)
+
+            vision.process_frame = process
+            vision.begin_calibration()
+            with patch("beaver_battle.vision.find_calibration", side_effect=superseded_detection):
+                snapshot = process(blank, monotonic())
+            assert vision.calibration_requested.is_set(), "Obsolete detection cleared a newer calibration request"
+            assert not snapshot.calibrated
+
+
 @dataclass
 class SyntheticCamera:
     online: Event
@@ -217,5 +295,6 @@ check_candidates()
 check_identity()
 check_walls()
 check_pipeline()
+check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration, laser identity/overlap, walls, immutable/stale snapshots, capture backlog/reconnect/release")
+print("Vision checks passed: calibration/cancellation, laser identity/overlap, walls, immutable/stale snapshots, capture backlog/reconnect/release")

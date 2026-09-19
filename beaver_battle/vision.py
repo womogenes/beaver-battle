@@ -232,6 +232,7 @@ class Vision:
     stopping: Event = field(default_factory=Event, init=False)
     frame_ready: Event = field(default_factory=Event, init=False)
     calibration_requested: Event = field(default_factory=Event, init=False)
+    calibration_generation: int = field(default=0, init=False)
     tracking_reset: Event = field(default_factory=Event, init=False)
     latest: VisionSnapshot = field(default_factory=lambda: VisionSnapshot(
         aims=MappingProxyType({}), confidence=MappingProxyType({})), init=False)
@@ -296,11 +297,25 @@ class Vision:
             self.identity_ready = float(ready_since)
 
     def begin_calibration(self):
-        self.calibration_requested.set()
         with self.lock:
+            self.calibration_generation += 1
+            self.calibration_requested.set()
             previous = self.latest
             self.latest = VisionSnapshot(previous.timestamp, MappingProxyType({}), MappingProxyType({}),
                                          previous.walls, previous.preview, False, "Show all four calibration markers")
+
+    def cancel_calibration(self):
+        """Cancel pending detection, retain the usable map, and let projected markers clear."""
+        with self.lock:
+            self.calibration_generation += 1
+            self.calibration_requested.clear()
+            self.wall_resume = max(self.wall_resume, monotonic() + 0.5)
+            self.tracking_reset.set()
+            previous = self.latest
+            calibrated = self.matrix is not None
+            error = self.capture_error or self.calibration_warning or ("" if calibrated else "Calibration required")
+            self.latest = VisionSnapshot(previous.timestamp, MappingProxyType({}), MappingProxyType({}),
+                                         self.walls, previous.preview, calibrated, error)
 
     def draw_calibration(self, surface):
         import pygame
@@ -312,8 +327,10 @@ class Vision:
             picture = pygame.transform.scale(picture, surface.get_size())
         surface.blit(picture, (0, 0))
 
-    def report_error(self, message, camera_failure=False):
+    def report_error(self, message, camera_failure=False, generation=None):
         with self.lock:
+            if generation is not None and generation != self.calibration_generation:
+                return
             if camera_failure:
                 self.capture_error = message
                 self.frame = None
@@ -364,12 +381,15 @@ class Vision:
                 item = self.frame
                 self.frame = None
                 identity, ready = self.identity, self.identity_ready
+                generation = self.calibration_generation
             if item is None or self.stopping.is_set():
                 continue
             timestamp, frame = item
             try:
                 snapshot = self.process_frame(frame, timestamp, identity, ready)
                 with self.lock:
+                    if generation != self.calibration_generation:
+                        continue
                     if self.capture_error:
                         snapshot = VisionSnapshot(snapshot.timestamp, MappingProxyType({}), MappingProxyType({}),
                                                   snapshot.walls, snapshot.preview, snapshot.calibrated, self.capture_error)
@@ -378,11 +398,14 @@ class Vision:
                                                   snapshot.walls, snapshot.preview, False, "Show all four calibration markers")
                     self.latest = snapshot
             except Exception as error:
-                self.report_error(f"Vision failure: {error}")
+                self.report_error(f"Vision failure: {error}", generation=generation)
 
     def process_frame(self, frame, timestamp, identity=None, ready_since=0.0):
         """Process one observation; also usable synchronously for synthetic checks."""
         camera = self.config.get("camera", {})
+        with self.lock:
+            generation = self.calibration_generation
+            calibrating = self.calibration_requested.is_set()
         if self.tracking_reset.is_set():
             self.tracker.tracks.clear()
             self.tracking_reset.clear()
@@ -402,25 +425,28 @@ class Vision:
             except (OSError, ValueError, KeyError):
                 self.calibration_warning = "Saved calibration invalid or size changed; recalibrate"
         preview = readonly(frame)
-        if self.calibration_requested.is_set():
+        if calibrating:
             matrix = find_calibration(frame, width, height)
-            if matrix is None:
-                return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), self.walls,
-                                      preview, False, "Show all four calibration markers")
-            self.matrix = matrix
-            self.tracker.tracks.clear()
-            self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
-            self.walls = None
-            self.last_wall_time = timestamp
-            self.wall_resume = timestamp + 0.5
-            self.calibration_warning = ""
-            try:
-                save_calibration(camera.get("calibration_file", "calibration.npz"), matrix, shape, (height, width))
-            except OSError as error:
-                self.calibration_warning = f"Calibration active but could not save: {error}"
-            self.calibration_requested.clear()
-            return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
-                                  preview, True, self.calibration_warning)
+            with self.lock:
+                if generation != self.calibration_generation:
+                    return self.latest
+                if matrix is None:
+                    return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), self.walls,
+                                          preview, False, "Show all four calibration markers")
+                self.matrix = matrix
+                self.tracker.tracks.clear()
+                self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
+                self.walls = None
+                self.last_wall_time = timestamp
+                self.wall_resume = timestamp + 0.5
+                self.calibration_warning = ""
+                try:
+                    save_calibration(camera.get("calibration_file", "calibration.npz"), matrix, shape, (height, width))
+                except OSError as error:
+                    self.calibration_warning = f"Calibration active but could not save: {error}"
+                self.calibration_requested.clear()
+                return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
+                                      preview, True, self.calibration_warning)
         if self.matrix is None:
             return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
                                   preview, False, self.calibration_warning or "Calibration required")
@@ -430,7 +456,10 @@ class Vision:
         if timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / max(0.1, float(camera.get("wall_update_hz", 10))):
             warped = cv2.warpPerspective(frame, self.matrix, (width, height), borderValue=(255, 255, 255))
             dark = np.max(warped, axis=2) < int(camera.get("wall_threshold", 75))
-            self.walls = self.wall_filter.update(dark)
-            self.last_wall_time = timestamp
+            with self.lock:
+                if generation != self.calibration_generation:
+                    return self.latest
+                self.walls = self.wall_filter.update(dark)
+                self.last_wall_time = timestamp
         return VisionSnapshot(timestamp, MappingProxyType(aims), MappingProxyType(confidence),
                               self.walls, preview, True, self.calibration_warning)
