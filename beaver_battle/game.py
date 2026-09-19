@@ -129,6 +129,87 @@ def prop_rect(prop):
     return pygame.FRect(prop.pos.x - prop.size[0] / 2, prop.pos.y - prop.size[1] / 2, *prop.size)
 
 
+def stroke_ends(ink, look=15, min_branch=25):
+    """Free ends of the drawing, with the direction each was travelling when it stopped.
+
+    A break in a stroke leaves two ends facing one another. Two arms of one shape merely
+    passing close by leave no ends at all, which is what separates a pen lift from a
+    spiral's neighbouring turns and keeps this from welding a drawing shut.
+
+    Thinning a hand-drawn blob sprouts short spurs all over it, and every spur looks like
+    an end, so only ends belonging to a branch of at least `min_branch` pixels count. That
+    is the difference between a line that stopped and a ragged edge.
+    """
+    thin = cv2.ximgproc.thinning(ink * 255) > 0
+    if not thin.any():
+        return []
+    # An integer kernel does not sum in filter2D; it has to be floating point.
+    neighbours = cv2.filter2D(thin.astype(np.float32), cv2.CV_32F, np.ones((3, 3), np.float32),
+                              borderType=cv2.BORDER_CONSTANT)
+    tips = thin & (neighbours == 2)
+    if not tips.any():
+        return []
+    # Cutting the junctions apart leaves plain arcs, whose pixel count is their length.
+    arcs = thin & (neighbours <= 3)
+    count, branch = cv2.connectedComponents(arcs.astype(np.uint8), connectivity=8)
+    length = np.bincount(branch.ravel(), minlength=count)
+    span = max(3, int(look)) | 1
+    mass = cv2.blur(ink.astype(np.float32), (span, span))
+    towards_x = cv2.blur((ink * np.arange(ink.shape[1])).astype(np.float32), (span, span))
+    towards_y = cv2.blur((ink * np.arange(ink.shape[0])[:, None]).astype(np.float32), (span, span))
+    ends = []
+    for y, x in zip(*np.nonzero(tips)):
+        piece = branch[y, x]
+        if not piece or length[piece] < min_branch:
+            continue
+        weight = mass[y, x]
+        if weight <= 0:
+            continue
+        # The stroke's body lies behind the end, so heading away from it is heading on.
+        away = np.array([x - towards_x[y, x] / weight, y - towards_y[y, x] / weight])
+        reach = np.hypot(*away)
+        if reach < 1.0:
+            continue
+        ends.append(((int(x), int(y)), away / reach))
+    return ends
+
+
+def mend_breaks(walls, reach=90, spread=60, thickness=3, look=15, min_branch=25):
+    """Carry a stroke's free end on to whatever it was heading for. Returns the mended mask.
+
+    link_strokes joins separate pieces, which leaves the case that broke the bench board:
+    a stroke interrupted part way round a loop, whose two sides are still one piece
+    because they meet somewhere else entirely. Connectivity cannot see that gap, and a
+    canoe fits through it.
+
+    Each free end is carried forward within `spread` degrees of the way it was going and
+    joined to the first ink within `reach`. Requiring a free end, and requiring the ink to
+    lie ahead of the stroke rather than beside it, is what keeps a spiral or a letter C
+    from being welded shut: their arms come close, but neither ends pointing at the other.
+    """
+    ink = walls.astype(np.uint8)
+    ends = stroke_ends(ink, look, min_branch)
+    if not ends:
+        return walls
+    steps = np.arange(look, int(reach) + 1)
+    angles = np.radians(np.arange(-int(spread), int(spread) + 1, 5))
+    mended = ink.copy()
+    height, width = ink.shape
+    for (x, y), heading in ends:
+        base = math.atan2(heading[1], heading[0]) + angles
+        xs = np.clip(np.rint(x + np.cos(base)[:, None] * steps).astype(int), 0, width - 1)
+        ys = np.clip(np.rint(y + np.sin(base)[:, None] * steps).astype(int), 0, height - 1)
+        hits = ink[ys, xs] > 0
+        if not hits.any():
+            continue
+        first = np.where(hits.any(axis=1), hits.argmax(axis=1), len(steps))
+        ray = int(np.argmin(first))
+        if first[ray] >= len(steps):
+            continue
+        cv2.line(mended, (x, y), (int(xs[ray, first[ray]]), int(ys[ray, first[ray]])), 1, thickness)
+    return mended.astype(bool)
+
+
 def link_strokes(walls, reach=70, min_piece=40, thickness=3):
     """Rejoin a stroke the camera broke into pieces. Returns the repaired mask.
 
@@ -393,9 +474,13 @@ class Game:
         if walls is not None:
             # A line drawn in one movement must hold as one barrier, whatever the camera
             # made of it, so repair the stroke before anything else reads the geometry.
-            ink = link_strokes(walls, round(self.setting("stroke_link", 70) * self.scale),
+            thickness = max(1, round(self.setting("stroke_width", 3) * self.scale))
+            ink = link_strokes(walls, round(self.setting("stroke_link", 40) * self.scale),
                                round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
-                               max(1, round(self.setting("stroke_width", 3) * self.scale)))
+                               thickness)
+            # Then carry any free end on, which reaches breaks that connectivity cannot see.
+            ink = mend_breaks(ink, round(self.setting("stroke_mend", 180) * self.scale),
+                              self.setting("stroke_spread", 60), thickness)
             walls, shapes = closed_shapes(ink, round(self.setting("shape_gap", 5) * self.scale),
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,

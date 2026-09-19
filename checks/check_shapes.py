@@ -12,18 +12,25 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import cv2
 import numpy as np
 
-from beaver_battle.game import closed_shapes, link_strokes
+from beaver_battle.game import closed_shapes, link_strokes, mend_breaks
 from checks.board_shapes import CASES, HEIGHT, WIDTH, arc, blank
 
 MIN_AREA = 1200
 MAX_AREA = .25 * WIDTH * HEIGHT
 CLOSURE = .20
+LINK = 40
+MEND = 180
+
+
+def repaired(walls):
+    """The whole ink-to-geometry path, as the game runs it."""
+    return mend_breaks(link_strokes(walls, LINK), MEND)
 
 
 def check_cases():
     failures = []
     for name, build, want, why in CASES:
-        walls = build().astype(bool)
+        walls = repaired(build().astype(bool))
         filled, shapes = closed_shapes(walls, 5, MIN_AREA, MAX_AREA, CLOSURE)
         if len(shapes) != want:
             failures.append(f"{name}: filled {len(shapes)} bodies, wanted {want} ({why})")
