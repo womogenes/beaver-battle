@@ -22,10 +22,10 @@ uv run python -m beaver_battle --headless --seconds 60 --screenshot /tmp/beaver-
 
 ## Connect the physical game
 
-1. Establish projector mirroring, keeping the laptop connected to the internet. The current HY300PRO is configured at `10.31.171.250`; see [projector setup](docs/projector.md). USB alone has not been verified as a video connection.
+1. Connect the laptop to the HY300PRO HDMI input and select that input on the projector. In desktop display settings, enable the projector as an extended display. Run `uv run python -m beaver_battle --list-displays`, then `uv run python -m beaver_battle --display 1 --fullscreen --display-test` (replace `1` with the projector index). See [HDMI setup](docs/projector.md).
 2. Fix the Arducam and projector in position so the camera sees the complete board. The current USB UVC camera is `/dev/video0`, configured for MJPEG 1280×720 at 30 fps.
 3. Assemble the buttons and output connections using [controller wiring](docs/wiring.md). Configure and flash each controller with a unique ID, Wi-Fi credentials, and the laptop's reachable IPv4 address using [firmware instructions](docs/firmware.md). Allow inbound UDP 4210 on the laptop. Wireless client isolation can prevent controllers from connecting even when internet works.
-4. Run `uv run python -m beaver_battle --fullscreen --calibrate`. Four projected ArUco markers establish the camera mapping. Calibration saves locally and returns to the lobby. Repeat whenever the camera/projector moves or keystone changes.
+4. Run `uv run python -m beaver_battle --display 1 --fullscreen --calibrate` (use the verified projector index). Four projected ArUco markers establish the camera mapping. Calibration saves locally and returns to the lobby. Repeat whenever the camera/projector moves or keystone changes.
 5. Choose a two- or three-player match; each player presses button 2 to ready. After the countdown, steer by pointing at the board. The game periodically isolates one laser to identify it; brief blinking is expected.
 
 Camera exposure and wall/laser thresholds need tuning on the actual projected surface. Synthetic checks do not establish physical tracking accuracy. Start with dark ink on a bright board, keep hands out of view while calibrating, and avoid small red projected artwork. Physical ink remains solid until erased; virtual destructible props are separate.
@@ -63,7 +63,7 @@ shot_interval = 0.30
 reload_seconds = 2.5
 ```
 
-`projector.ip` records the configurable LAN address for setup/diagnostics. Miracast discovers the receiver through Wi-Fi Direct; changing this setting does not initiate casting. `--players`, `--fullscreen`, and `--config` override launcher behavior. Keep credentials and calibration captures out of git.
+`--display N` selects the output; `[display].index` saves the choice in local configuration. `--list-displays` and `--display-test` do not start the camera or controller networking. Fullscreen scales the logical canvas to the selected desktop. `projector.ip` records the configurable LAN address for wireless diagnostics and is unused by HDMI. Miracast discovers the receiver through Wi-Fi Direct; changing this setting does not initiate casting. `--players`, `--fullscreen`, and `--config` override launcher behavior. Keep credentials and calibration captures out of git.
 
 ## Checks and architecture
 
@@ -72,13 +72,14 @@ uv run python -m checks.check_game
 uv run python -m checks.check_vision
 uv run python -m checks.check_network
 uv run python -m checks.check_app
+uv run python -m checks.check_display
 cc -std=c11 -Wall -Wextra -Werror -pedantic firmware/check.c firmware/main/controller.c -o /tmp/beaver-firmware-check
 /tmp/beaver-firmware-check
 ```
 
 The networking check opens localhost UDP sockets. The camera checks generate synthetic images without opening a device. The game and menu checks run without a display. Firmware build and flashing are separate from its portable logic check.
 
-Validated on September 19, 2026: game/vision/network/menu checks, a 180-second integrated simulation ending in a 5–1–3 match with 41 hit events, portable C logic checks, and an ESP32 firmware build with ESP-IDF 5.5.0. One physical ESP32 was flashed with hash verification and booted controller 1. The user subsequently confirmed the buttons and laser work with the standalone laser-button firmware test. A five-second physical launcher run opened the desktop window and UDP listener, received live Arducam frames, and released the camera on exit. After receiver acceptance and installing the missing host DHCP component (`dnsmasq`), the projector obtained an address and requested playback; the sender reports streaming at 1920×1080/30 while MIT internet remains available. The user reported a white projected screen even while the sender reported streaming; working projection is not yet established. A software-encoder retry is pending receiver reconnection. Physical laser tracking and calibrated water feedback remain bench work. Standalone laser and servo test modes are documented in [firmware instructions](docs/firmware.md).
+Validated on September 19, 2026: game/vision/network/menu checks, a 180-second integrated simulation ending in a 5–1–3 match with 41 hit events, portable C logic checks, and an ESP32 firmware build with ESP-IDF 5.5.0. One physical ESP32 was flashed with hash verification and booted controller 1. The user subsequently confirmed the buttons and laser work with the standalone laser-button firmware test. A five-second physical launcher run opened the desktop window and UDP listener, received live Arducam frames, and released the camera on exit. After receiver acceptance and installing the missing host DHCP component (`dnsmasq`), the projector obtained an address and requested playback; the sender reports streaming at 1920×1080/30 while MIT internet remains available. The user reported a white projected screen even while the sender reported streaming; working projection is not yet established. The software-encoder retry timed out during pairing. The user chose HDMI; output selection and a standalone display test are ready, but the cable and physical picture remain untested. Physical laser tracking and calibrated water feedback remain bench work. Standalone laser and servo test modes are documented in [firmware instructions](docs/firmware.md).
 
 `app.py` owns menus and the fixed-step loop; `game.py` owns combat; `vision.py` publishes immutable latest-frame observations; `network.py` handles UDP and laser identification. [PROTOCOL.md](PROTOCOL.md) is the shared firmware contract. Another game can consume `PlayerInput` and wall masks and emit `FeedbackEvent` without replacing camera or controller code. See [vision notes](docs/vision.md), [game notes](docs/game.md), and [physical game ideas](docs/physical-ideas.md).
 

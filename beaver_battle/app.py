@@ -67,6 +67,31 @@ def menu_choices(mode):
     return ['Resume', 'New match', 'Calibrate board', 'Quit']
 
 
+def display_test(pygame, screen, display_index, seconds=0):
+    width, height = screen.get_size()
+    font = pygame.font.Font(None, max(24, width // 28))
+    clock = pygame.time.Clock()
+    started = time.monotonic()
+    running = True
+    while running:
+        elapsed = time.monotonic() - started
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                running = False
+        for index, color in enumerate(((220, 30, 30), (30, 190, 30), (30, 50, 220))):
+            pygame.draw.rect(screen, color, (index * width // 3, 0, width // 3 + 1, height))
+        pygame.draw.rect(screen, 'white', screen.get_rect().inflate(-8, -8), 4)
+        pygame.draw.circle(screen, 'yellow', (int(elapsed * 200) % width, height * 3 // 4), 20)
+        for row, label in enumerate((f'BEAVER BATTLE — DISPLAY {display_index}',
+                                     f'Logical canvas: {width} x {height}', 'All four white edges should be visible. Esc exits.')):
+            rendered = font.render(label, True, 'white', 'black')
+            screen.blit(rendered, rendered.get_rect(center=(width // 2, height // 3 + row * 50)))
+        pygame.display.flip()
+        clock.tick(30)
+        if seconds and elapsed >= seconds:
+            running = False
+
+
 def main():
     parser = argparse.ArgumentParser(description='Beaver Battle: laser-tracked canoe combat')
     parser.add_argument('--config', type=Path, default=Path('config.toml'))
@@ -77,6 +102,9 @@ def main():
     parser.add_argument('--report', type=Path, help='write a JSON smoke-test summary')
     parser.add_argument('--calibrate', action='store_true', help='start with projected calibration markers')
     parser.add_argument('--fullscreen', action='store_true')
+    parser.add_argument('--display', type=int, help='output display index from --list-displays')
+    parser.add_argument('--list-displays', action='store_true', help='list connected outputs without starting camera or controllers')
+    parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
     args = parser.parse_args()
@@ -96,10 +124,33 @@ def main():
     from beaver_battle.vision import Vision
 
     pygame.init()
+    desktops = pygame.display.get_desktop_sizes()
+    if args.list_displays:
+        for index, size in enumerate(desktops):
+            print(f'{index}: {size[0]} x {size[1]}')
+        pygame.quit()
+        return
+    display_index = args.display if args.display is not None else config['display'].get('index', 0)
+    if args.headless:
+        display_index = 0
+    if type(display_index) is not int or not 0 <= display_index < len(desktops):
+        pygame.quit()
+        parser.error(f'display {display_index!r} is unavailable; run --list-displays after connecting HDMI')
     width, height = config['display']['width'], config['display']['height']
     flags = pygame.FULLSCREEN if args.fullscreen or config['display']['fullscreen'] else 0
-    screen = pygame.display.set_mode((width, height), flags)
+    if flags and not args.headless:
+        flags |= pygame.SCALED
+    screen = pygame.display.set_mode((width, height), flags, display=display_index)
     pygame.display.set_caption('Beaver Battle')
+    if args.display_test:
+        try:
+            display_test(pygame, screen, display_index, args.seconds)
+            if args.screenshot:
+                args.screenshot.parent.mkdir(parents=True, exist_ok=True)
+                pygame.image.save(screen, str(args.screenshot))
+        finally:
+            pygame.quit()
+        return
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 30)
     title_font = pygame.font.Font(None, 64)
@@ -302,7 +353,8 @@ def main():
             pygame.image.save(screen, str(args.screenshot))
         report = dict(frames=frame_count, simulation_seconds=round(elapsed, 3), mode=mode, phase=game.phase,
                       scores=game.scores, feedback_events=feedback_count, simulated=args.simulate,
-                      projector=config['projector'], camera_calibrated=bool(snapshot.calibrated),
+                      projector=config['projector'], display_index=display_index,
+                      camera_calibrated=bool(snapshot.calibrated),
                       camera_frame_available=snapshot.preview is not None)
         if args.report:
             args.report.parent.mkdir(parents=True, exist_ok=True)

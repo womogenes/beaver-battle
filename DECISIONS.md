@@ -11,7 +11,7 @@
 - Physical ink remains solid until erased. Projected destructible objects are separate so damage survives camera updates.
 - Continuous red-dot tracking plus periodic one-controller-at-a-time identification windows. Do not infer player identity from unsynchronized high-frequency PWM. Ambiguous aim retains last heading until confidently reacquired.
 - Arducam-1080P-HDR is a USB UVC camera at /dev/video0; use configurable MJPEG 1280x720 at 30 fps. A 60-frame live sample measured 29.95 fps at 720p. It also advertises 1080p/30 and manual controls; 1080p performance remains unverified.
-- HY300PRO at configurable 10.31.171.250; built-in Miracast currently says waiting for connection. Use wireless first and HDMI when available. Preserve laptop MIT internet connectivity. AirScreen's bundled version is blocked by an update prompt.
+- HY300PRO at configurable 10.31.171.250; built-in Miracast currently says waiting for connection. The user chose HDMI after wireless casting produced no usable picture; HDMI is now the primary setup path. Preserve laptop MIT internet connectivity. AirScreen's bundled version is blocked by an update prompt.
 - Hit feedback is a servo-actuated water mechanism inside each controller. Implement configurable press/return commands and duplicate protection now. User is handling power, cooling, and mechanical construction later; do not treat those as blockers to software delivery.
 - One-time setup may use the laptop. Lobby, ready, pause/resume, calibration, and match restart must be possible from controllers.
 - Root plus three workers implement in parallel. Bench assembly remains human work. Push runnable milestones to the user-configured origin.

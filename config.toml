@@ -2,12 +2,13 @@
 width = 1280
 height = 720
 fullscreen = false
+index = 0 # Run --list-displays after connecting HDMI, then select the projector.
 fps = 60
 
 [projector]
 ip = "10.31.171.250"
 name = "HY300PRO"
-transport = "miracast"
+transport = "hdmi"
 
 [camera]
 device = 0
