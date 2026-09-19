@@ -168,15 +168,15 @@ static void servo_button_test(void)
     uint64_t next_step_ms = time_ms() + 20;
     TickType_t wake_tick = xTaskGetTickCount();
     ESP_LOGI(log_tag, "SERVO BUTTON TEST: GPIO27 lowers pulse; GPIO32 raises; neither/both holds; laser off; no Wi-Fi");
-    ESP_LOGI(log_tag, "SERVO GPIO%d 1500 us; limits %d..%d us", SERVO_GPIO,
-             CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US);
+    ESP_LOGI(log_tag, "SERVO GPIO%d 1500 us; limits %d..%d us; step %d us / 20 ms", SERVO_GPIO,
+             CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
     while (true) {
         uint64_t now = time_ms();
         buttons_read(&fire, &special, now);
         if (now >= next_step_ms) {
             next_step_ms = now + 20;
             uint32_t requested = servo_jog(pulse_us, fire.pressed, special.pressed,
-                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, 5);
+                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
             if (requested != pulse_us) {
                 pulse_us = requested;
                 servo_pulse(pulse_us);

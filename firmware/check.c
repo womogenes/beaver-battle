@@ -96,6 +96,10 @@ int main(void)
     assert(servo_jog(1798, false, true, 1200, 1800, 5) == 1800);
     assert(servo_jog(1200, true, false, 1200, 1800, 5) == 1200);
     assert(servo_jog(1800, false, true, 1200, 1800, 5) == 1800);
+    assert(servo_jog(1500, true, false, 1000, 2000, 25) == 1475);
+    assert(servo_jog(1500, false, true, 1000, 2000, 25) == 1525);
+    assert(servo_jog(1010, true, false, 1000, 2000, 25) == 1000);
+    assert(servo_jog(1990, false, true, 1000, 2000, 25) == 2000);
     puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect, servo jogging.");
     return 0;
 }

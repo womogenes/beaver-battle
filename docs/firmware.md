@@ -94,11 +94,18 @@ the shared project; a board's ignored local sdkconfig can enable it for testing.
 For a positional-servo direction test, first disable the laser bench option,
 then enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
 rebuild/flash. GPIO26 produces 50 Hz pulses starting at 1500 microseconds. Hold
-FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. Each step
-is 5 microseconds every 20 ms (250 microseconds/second). Releasing both buttons
+FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. The default
+step is 5 microseconds every 20 ms (250 microseconds/second);
+`BB_SERVO_TEST_STEP_US` adjusts command speed from 1 to 100 microseconds per
+20 ms. For example, a 25-microsecond step commands 1250 microseconds/second:
+1000–2000 microseconds takes 0.8 seconds end to end, or 0.4 seconds from the
+1500-microsecond center to either limit. Actual servo motion can lag the command.
+Releasing both buttons
 or holding both keeps the last commanded position. Default limits are
 1200–1800 microseconds; `BB_SERVO_TEST_MIN_US` and `BB_SERVO_TEST_MAX_US` let you
-adjust the limits during calibration. Actual rotation direction depends on the
+adjust the limits during calibration. These are bounded pulse-width calibration
+settings, not an angle mapping or a promise of full 180-degree travel. Actual
+rotation direction depends on the
 servo and mounting; this mode assumes a positional servo, not a continuous
 rotation servo. The laser stays off and Wi-Fi/UDP do not start. Serial output
 identifies **SERVO BUTTON TEST**, reports button edges and the current pulse

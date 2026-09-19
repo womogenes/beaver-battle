@@ -63,6 +63,12 @@ config BB_SERVO_TEST_MAX_US
     range 1500 2500
     default 1800
 
+config BB_SERVO_TEST_STEP_US
+    int "Servo bench pulse step per 20 ms (microseconds)"
+    depends on BB_SERVO_BUTTON_TEST
+    range 1 100
+    default 5
+
 config BB_SERVO_REST_US
     int "Servo rest pulse width (microseconds)"
     range 500 2500
