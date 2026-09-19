@@ -2,13 +2,13 @@
 
 The user-identified projector is an HY300 PRO, shown as **HY300PRO** by its built-in Miracast receiver. Its exact Android/firmware build has not been established. Its current LAN address is `10.31.171.250`; change `[projector].ip` in ignored `config.local.toml` when it moves.
 
-The camera showed the bundled AirScreen app blocked by an update prompt. The built-in Miracast/WiFiDisplay app is discovered by GNOME Network Displays. On September 19, the sender established P2P and reached `WAIT_SOCKET`; the camera then showed an **Invitation to connect** dialog on the projector. Without receiver-side acceptance, the attempt timed out after about 45 seconds (`supplicant-timeout`). The sender was returned to its available-receivers screen. Acceptance remains outstanding because the user is away and no remote input interface is available. Video streaming and physical calibration are not yet verified. MIT remained connected, with an HTTPS request returning 200 during pairing. Bluetooth does not provide the desktop video path. No USB display mode has been verified for this unit.
+The camera showed the bundled AirScreen app blocked by an update prompt. Use the built-in Miracast/WiFiDisplay app. On September 19, the user accepted the receiver invitation and Wi-Fi Direct connected, but streaming initially stalled because the laptop lacked `dnsmasq` for DHCP. After installing it and reconnecting, the receiver obtained a DHCP lease, completed RTSP negotiation, and sent PLAY; GNOME Network Displays entered **STREAMING**, selecting 1920×1080 at 30 fps. MIT remained connected concurrently. This confirms sender-side streaming; the physical projected picture, stability, latency, and calibration still need verification. Bluetooth does not provide the desktop video path. No USB display mode has been verified for this unit.
 
 ## Wireless display while retaining internet
 
 Wi-Fi Direct creates a peer-to-peer link between laptop and receiver. Miracast uses this link; it does not require manually joining the projector's hotspot. Keep the normal MIT connection active. This laptop's MediaTek mt7921e driver advertises concurrent station and P2P interfaces, so both links can coexist; successful discovery alone does not prove a stable display stream.
 
-GNOME Network Displays 0.99.0 is installed as a user Flatpak:
+GNOME Network Displays 0.99.0 is installed as a user Flatpak. The host also needs `dnsmasq` so NetworkManager can assign the receiver an address on the Wi-Fi Direct link; it is now installed. NetworkManager starts its own instance, so a separate system-wide DHCP service is unnecessary. Launch with:
 
 ```sh
 flatpak run org.gnome.NetworkDisplays
