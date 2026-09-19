@@ -2,6 +2,7 @@
 
 These ideas build on the same planar wall mask and laser/button inputs. They are extensions, not features already implemented in Beaver Battle.
 
+- **Closed outlines (implemented):** a closed marker outline is filled with a projected log or rock texture and is solid throughout; see [game notes](game.md#closed-outlines-become-logs-and-rocks).
 - **Draw-and-erase dams:** redirect boats by drawing channels, then erase a gap to release a trapped player. Existing live wall collision already supports the basic interaction; animated water flow would be a separate game rule.
 - **Team bridge builder:** one player steers while a teammate redraws the route around hazards. Put a time or ink-length budget on construction to prevent enclosing every opponent.
 - **Moving islands:** slide flat dark cards across the board as shelters. The current game relocates trapped entities to free space; a future pushing mechanic would need separate collision rules.

@@ -59,6 +59,18 @@ Destroyed barrels and asteroids always drop a pickup. A shuffled bag of the thre
 
 New physical ink displaces overlapping players, pickups, and projected props to the nearest valid position without damage. Projectiles/mines covered by new ink disappear without exploding. If an object cannot fit anywhere, the game shows “Clear space on the board” and waits for a new mask. Erasing ink restores traversable space. Camera updates never restore a destroyed projected prop; only the next round does.
 
+### Closed outlines become logs and rocks
+
+Every new wall mask is searched for bright regions fully enclosed by ink (`closed_shapes` in `game.py`: a small morphological close, then `cv2.findContours` with `RETR_CCOMP`; hole contours are the enclosures). Each enclosure is added to the solid mask, so outline plus interior collide exactly like ink, and the interior is projected with a bright texture: a long enclosure (minimum-area rectangle at least 2:1) is a log with grain along its long axis, anything rounder is a rock. `Game.walls` is ink plus interiors; `Game.shapes` lists the current enclosures.
+
+- The search reruns on every published mask (up to `camera.wall_update_hz`). Erasing a gap wider than `game.shape_gap` pixels reopens the water within one wall-persistence interval; closing the outline refills it. Bodies caught inside a newly closed outline are relocated like any other new ink.
+- Breaks narrower than `game.shape_gap` (default 5 px) are bridged for the enclosure test only, so marker skips and threshold noise do not make a fill flicker.
+- Enclosures below `game.shape_min_area` (default 400 px², letter loops and specks) or above `game.shape_max_fraction` of the board (default 0.25, an arena border) stay hollow. A region bounded partly by the board edge is open water, not an enclosure.
+- Fills are projected only on the bright interior, never relied on to cover ink, and both palettes stay far above `camera.wall_threshold` and below the laser redness test, so the projection cannot erase its own outline or fake a laser. The renderer check covers a drawn log and rock.
+- A fill keeps its previous kind while its aspect ratio is between 1.7 and 2.3, and its previous grain angle while the new one is within 8°, matched by center within 24 px. Rock speckle is anchored to the board. Camera jitter therefore does not make textures shimmer.
+
+Only synthetic masks have been checked. Whether a real camera sees the projected fill as reliably bright next to real ink still needs the mounted setup.
+
 Collision uses a shared distance map for physical ink and direct circle/rectangle tests for the small virtual arena. Motion is substepped and projectiles use swept collision. This keeps the engine independent of the vision implementation without a general physics framework.
 
 Placeholder polygons, text, effects, and backgrounds use bright colors so they do not look like dark physical ink or isolated red laser dots. Optional `assets/canoe.png` and `assets/beaver.png` replace player polygons; sprites point right before rotation and should use transparency plus the same bright palette. `game.sprite_dir` can select another asset directory. The engine deliberately does not create or load any other game assets.

@@ -9,10 +9,11 @@ import tomllib
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
+import cv2
 import numpy as np
 import pygame
 
-from beaver_battle.game import Game, Mine, Pickup, Prop, Rock
+from beaver_battle.game import Game, Mine, Pickup, Prop, Rock, closed_shapes
 from beaver_battle.model import PlayerInput
 
 
@@ -38,7 +39,7 @@ def arena(players=(1, 2), moving=False):
 game = Game(config)
 game.new_match([1, 2, 3])
 assert not game.blocked
-assert {prop.kind for prop in game.props} == {"wall", "barrier", "asteroid", "barrel", "turret", "beam"}
+assert {prop.kind for prop in game.props} == {"asteroid"}
 
 # Continuous motion, a bounded turn rate, and no aim means retaining heading.
 game = arena((1,), moving=True)
@@ -124,6 +125,72 @@ game.update(0, {}, np.ones_like(walls))
 assert game.blocked and game.error
 game.update(0, {}, np.zeros_like(walls))
 assert not game.blocked and not game.error
+
+# Closed ink outlines become solid logs or rocks; open, edge-bounded, tiny, and arena-sized ones stay hollow.
+def drawing(*marks):
+    ink = np.zeros((720, 1280), np.uint8)
+    for mark in marks:
+        mark(ink)
+    return ink.astype(bool)
+
+
+def log_outline(ink, center=(400, 420), degrees=25):
+    cv2.polylines(ink, [cv2.boxPoints((center, (300, 70), degrees)).astype(np.int32)], True, 1, 6)
+
+
+def rock_outline(ink):
+    cv2.circle(ink, (850, 300), 70, 1, 6)
+
+
+walls = drawing(log_outline, rock_outline,
+                lambda ink: cv2.ellipse(ink, (1000, 560), (80, 60), 0, 40, 320, 1, 6),
+                lambda ink: cv2.ellipse(ink, (640, 719), (90, 70), 0, 180, 360, 1, 6),
+                lambda ink: cv2.circle(ink, (150, 600), 8, 1, 3),
+                lambda ink: cv2.rectangle(ink, (30, 80), (1250, 640), 1, 6))
+solid, shapes = closed_shapes(walls, 5, 400, .25 * walls.size)
+assert sorted(shape.kind for shape in shapes) == ["log", "rock"]
+log = next(shape for shape in shapes if shape.kind == "log")
+assert abs(math.degrees(log.angle) - 25) < 2
+assert solid[420, 400] and solid[300, 850] and not walls[420, 400] and not walls[300, 850]
+assert not solid[560, 1000] and not solid[690, 640] and not solid[600, 150] and not solid[200, 640]
+assert np.array_equal(solid & walls, walls)
+
+# Fills follow the live mask: a hairline break is bridged, erasing a real gap reopens the water, redrawing refills.
+game = arena()
+game.players[1].pos = pygame.Vector2(400, 420)
+game.update(0, {}, drawing(log_outline))
+assert [shape.kind for shape in game.shapes] == ["log"] and not game.blocked
+assert not game.physical_free(pygame.Vector2(400, 420), 4)
+assert game.physical_free(game.players[1].pos, game.players[1].radius) and game.players[1].state == "canoe"
+assert not game.walls[int(game.players[1].pos.y), int(game.players[1].pos.x)]
+end, target = game.trace(pygame.Vector2(100, 420), pygame.Vector2(700, 420), 4, players=False)
+assert target == "wall" and end.x < 400
+hairline = drawing(rock_outline)
+hairline[298:301, 900:940] = False
+game.update(0, {}, hairline)
+assert [shape.kind for shape in game.shapes] == ["rock"] and not game.physical_free(pygame.Vector2(850, 300), 4)
+erased = drawing(rock_outline)
+erased[285:315, 900:940] = False
+game.update(0, {}, erased)
+assert not game.shapes and game.physical_free(pygame.Vector2(850, 300), 4)
+game.update(0, {}, drawing(rock_outline))
+assert len(game.shapes) == 1 and not game.physical_free(pygame.Vector2(850, 300), 4)
+
+# Camera jitter neither wobbles the grain nor flips a borderline fill between log and rock.
+game = arena()
+game.update(0, {}, drawing(log_outline))
+angle = game.shapes[0].angle
+game.update(0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 28)))
+assert game.shapes[0].angle == angle
+game.update(0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 60)))
+assert abs(math.degrees(game.shapes[0].angle) - 60) < 2
+game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (810, 400), 1, 6)))
+assert game.shapes[0].kind == "log" and 2 < game.shapes[0].ratio < 2.3
+game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
+assert game.shapes[0].kind == "log" and game.shapes[0].ratio < 2
+game.update(0, {}, np.zeros((720, 1280), dtype=bool))
+game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
+assert game.shapes[0].kind == "rock"
 
 # Wall impacts preserve lives and reflect the moving canoe.
 game = arena((1,), moving=True)
@@ -227,14 +294,15 @@ assert game.players[1].speed == config["game"]["beaver_speed"]
 # The complete renderer does not project dark ink or laser-red placeholder pixels.
 game = Game(config)
 game.new_match([1, 2, 3])
-game.update(.1, {})
+game.update(.1, {}, drawing(log_outline, rock_outline))
 surface = pygame.Surface((1280, 720))
 game.draw(surface)
 pixels = pygame.surfarray.array3d(surface)
+assert len({tuple(color) for color in pixels[330:510:3, 420]}) > 1 and len({tuple(color) for color in pixels[800:900:3, 300]}) > 1
 assert pixels.max(axis=2).min() > config["camera"]["wall_threshold"]
 redness = pixels[:, :, 0].astype(np.int16) - pixels[:, :, 1:].max(axis=2).astype(np.int16)
 assert not np.any((pixels[:, :, 0] >= 160) & (redness >= 60))
 if len(sys.argv) > 1:
     pygame.image.save(surface, sys.argv[1])
 pygame.quit()
-print("Game checks passed: movement, ammo, lives, feedback, rounds, live walls, every weapon and hazard, rendering")
+print("Game checks passed: movement, ammo, lives, feedback, rounds, live walls, closed-shape fills, every weapon and hazard, rendering")

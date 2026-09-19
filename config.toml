@@ -47,6 +47,9 @@ rock_speed = 650.0
 rock_lifetime = 2.0
 invulnerability = 0.8
 winning_score = 5
+shape_gap = 5
+shape_min_area = 400
+shape_max_fraction = 0.25
 round_delay = 3.0
 seed = 2026
 
