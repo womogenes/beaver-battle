@@ -112,6 +112,8 @@ def main():
     parser.add_argument('--fullscreen', action='store_true')
     parser.add_argument('--display', type=int, help='output display index from --list-displays')
     parser.add_argument('--list-displays', action='store_true', help='list connected outputs without starting camera or controllers')
+    parser.add_argument('--list-cameras', action='store_true', help='probe camera indices without opening a window')
+    parser.add_argument('--camera', type=int, help='camera device index from --list-cameras')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
@@ -119,6 +121,13 @@ def main():
     config = load_config(args.config)
     if args.players:
         config['game']['players'] = args.players
+    if args.camera is not None:
+        config['camera']['device'] = args.camera
+    if args.list_cameras:
+        from beaver_battle.vision import probe_cameras
+        for index, size in probe_cameras(config):
+            print(f'{index}: {size[0]} x {size[1]}' if size else f'{index}: unavailable')
+        return
     if args.headless:
         args.simulate = True
         os.environ['SDL_VIDEODRIVER'] = 'dummy'

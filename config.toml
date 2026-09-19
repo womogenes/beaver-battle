@@ -11,11 +11,15 @@ name = "HY300PRO"
 transport = "hdmi"
 
 [camera]
-device = 0
+device = 0 # Run --list-cameras; index 0 is often the built-in laptop camera, not the Arducam.
+backend = "" # Empty picks avfoundation on macOS and v4l2 on Linux; override for an unusual host.
 width = 1280
 height = 720
 fps = 30
 calibration_file = "calibration.npz"
+marker_clip_limit = 8.0 # Local contrast equalization for calibration markers; 0 disables it.
+marker_tiles = 16
+marker_memory_seconds = 2.0 # Hold the rig still; markers seen this recently count together.
 wall_threshold = 75
 wall_update_hz = 10
 wall_persistence = 3

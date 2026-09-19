@@ -10,9 +10,10 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from beaver_battle.vision import (LaserTracker, Vision, WallFilter, calibration_image,
+from beaver_battle.vision import (LaserTracker, MarkerMemory, Vision, WallFilter,
+                                  calibration_image, capture_backend, detect_markers,
                                   find_calibration, laser_candidates, load_calibration,
-                                  save_calibration)
+                                  marker_message, save_calibration)
 
 
 def check_calibration():
@@ -28,8 +29,14 @@ def check_calibration():
     camera_points = cv2.perspectiveTransform(targets[None], projection)
     recovered = cv2.perspectiveTransform(camera_points, matrix)[0]
     assert np.max(np.linalg.norm(recovered - targets, axis=1)) < 2
+    assert "missing" not in marker_message(detect_markers(camera))
+    # A projector on a lit whiteboard can leave only a few gray levels between its black and white.
+    faint = (camera.astype(np.float32) * 0.06 + 160).astype(np.uint8)
+    assert len(detect_markers(faint, clip_limit=0)) < 4, "Faint markers need local equalization"
+    assert find_calibration(faint, width, height) is not None, "Equalization must recover a faint projection"
     camera[0:260, 0:330] = 190
     assert find_calibration(camera, width, height) is None, "Missing a corner marker must not calibrate"
+    assert marker_message(detect_markers(camera)) == "Show all four calibration markers; missing top-left"
     with TemporaryDirectory() as temporary:
         path = Path(temporary) / "calibration.npz"
         save_calibration(path, matrix, (720, 1024), (height, width))
@@ -39,6 +46,48 @@ def check_calibration():
             raise AssertionError("Changed camera shape accepted stale calibration")
         except ValueError:
             pass
+
+
+def check_marker_memory():
+    """A dim projection can hide a different marker on each frame while the rig sits still."""
+    memory = MarkerMemory(memory_seconds=2.0)
+    corners = {number: np.float32([(0, 0), (1, 0), (1, 1), (0, 1)]) for number in range(4)}
+    assert sorted(memory.update({0: corners[0], 1: corners[1]}, 10.0)) == [0, 1]
+    assert sorted(memory.update({2: corners[2]}, 10.5)) == [0, 1, 2]
+    assert sorted(memory.update({3: corners[3]}, 11.0)) == [0, 1, 2, 3], "One calibration may span frames"
+    assert sorted(memory.update({}, 12.9)) == [3], "Sightings expire after the memory window"
+    memory.clear()
+    assert memory.update({}, 13.0) == {}, "A new calibration cannot reuse the previous pose"
+
+    width, height = 800, 480
+    image = calibration_image(width, height)
+    flicker = MarkerMemory()
+    found = {}
+    for number in range(4):
+        single = {number: detect_markers(image)[number]}
+        found = flicker.update(single, 20.0 + number * 0.1)
+    from beaver_battle.vision import homography
+    matrix = homography(found, width, height)
+    assert matrix is not None, "Four markers seen one per frame must still calibrate"
+    targets = np.float32([(400, 240), (100, 100), (700, 400)])
+    recovered = cv2.perspectiveTransform(targets[None], matrix)[0]
+    assert np.max(np.linalg.norm(recovered - targets, axis=1)) < 2
+
+
+def check_backend():
+    assert capture_backend("v4l2") == cv2.CAP_V4L2
+    assert capture_backend("AVFoundation") == cv2.CAP_AVFOUNDATION, "Backend names are case-insensitive"
+    try:
+        capture_backend("videotoaster")
+        raise AssertionError("Unknown camera.backend name accepted")
+    except ValueError:
+        pass
+    with patch("beaver_battle.vision.platform.system", return_value="Darwin"):
+        assert capture_backend() == cv2.CAP_AVFOUNDATION, "macOS cannot open the Linux-only V4L2 backend"
+    with patch("beaver_battle.vision.platform.system", return_value="Linux"):
+        assert capture_backend() == cv2.CAP_V4L2
+    with patch("beaver_battle.vision.platform.system", return_value="Haiku"):
+        assert capture_backend() == cv2.CAP_ANY
 
 
 def check_candidates():
@@ -158,7 +207,7 @@ def check_cancel_calibration():
             saved_bytes = path.read_bytes() if path.exists() else None
             detecting, release, completed = Event(), Event(), Event()
 
-            def delayed_detection(frame, screen_width, screen_height):
+            def delayed_detection(found, screen_width, screen_height, **options):
                 detecting.set()
                 assert release.wait(2), "Cancellation must not wait for marker detection"
                 return np.eye(3)
@@ -173,7 +222,7 @@ def check_cancel_calibration():
             vision.process_frame = observed_process
             vision.begin_calibration()
             assert not vision.snapshot().calibrated
-            with patch("beaver_battle.vision.find_calibration", side_effect=delayed_detection):
+            with patch("beaver_battle.vision.homography", side_effect=delayed_detection):
                 vision.process_thread = Thread(target=vision.process_loop)
                 vision.process_thread.start()
                 try:
@@ -205,14 +254,14 @@ def check_cancel_calibration():
                 assert vision.matrix is None and not path.exists(), "Cancelled first calibration must remain unavailable"
                 assert "Calibration required" in vision.latest.error
 
-            def superseded_detection(frame, screen_width, screen_height):
+            def superseded_detection(found, screen_width, screen_height, **options):
                 vision.cancel_calibration()
                 vision.begin_calibration()
                 return np.eye(3)
 
             vision.process_frame = process
             vision.begin_calibration()
-            with patch("beaver_battle.vision.find_calibration", side_effect=superseded_detection):
+            with patch("beaver_battle.vision.homography", side_effect=superseded_detection):
                 snapshot = process(blank, monotonic())
             assert vision.calibration_requested.is_set(), "Obsolete detection cleared a newer calibration request"
             assert not snapshot.calibrated
@@ -258,6 +307,7 @@ def check_worker():
     process = vision.process_frame
 
     def open_camera(device, backend):
+        assert backend == capture_backend(), "Capture must request this host's backend"
         camera = SyntheticCamera(online)
         devices.append(camera)
         return camera
@@ -291,10 +341,13 @@ def check_worker():
 
 
 check_calibration()
+check_marker_memory()
+check_backend()
 check_candidates()
 check_identity()
 check_walls()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation, laser identity/overlap, walls, immutable/stale snapshots, capture backlog/reconnect/release")
+print("Vision checks passed: calibration/cancellation/guidance, multi-frame markers, host capture backend, laser identity/overlap, "
+      "walls, immutable/stale snapshots, capture backlog/reconnect/release")

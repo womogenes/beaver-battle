@@ -4,6 +4,7 @@ Preview arrays are BGR camera pixels. Aims and walls use logical display pixels.
 No camera control (exposure, gain, white balance) is changed by this module.
 """
 
+import platform
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
@@ -15,6 +16,47 @@ import cv2
 import numpy as np
 
 from beaver_battle.model import VisionSnapshot
+
+
+BACKENDS = {"avfoundation": cv2.CAP_AVFOUNDATION, "v4l2": cv2.CAP_V4L2,
+            "dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
+CORNER_NAMES = {0: "top-left", 1: "top-right", 2: "bottom-right", 3: "bottom-left"}
+MARKER_CLIP_LIMIT = 8.0
+MARKER_TILES = 16
+MARKER_MEMORY_SECONDS = 2.0
+
+
+def capture_backend(name=""):
+    """Pick the host's UVC backend; V4L2 is Linux-only and fails to open on macOS."""
+    if name:
+        if name.lower() not in BACKENDS:
+            raise ValueError(f"Unknown camera.backend {name!r}; use one of {sorted(BACKENDS)}")
+        return BACKENDS[name.lower()]
+    return {"Darwin": cv2.CAP_AVFOUNDATION, "Linux": cv2.CAP_V4L2}.get(platform.system(), cv2.CAP_ANY)
+
+
+def open_capture(config):
+    camera = config.get("camera", {})
+    capture = cv2.VideoCapture(camera.get("device", 0), capture_backend(camera.get("backend", "")))
+    if capture.isOpened():
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera.get("width", 1280)))
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera.get("height", 720)))
+        capture.set(cv2.CAP_PROP_FPS, float(camera.get("fps", 30)))
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return capture
+
+
+def probe_cameras(config, count=5):
+    """Open each index briefly so the operator can find the board camera, not the built-in one."""
+    results = []
+    for index in range(count):
+        probe = dict(config, camera=dict(config.get("camera", {}), device=index))
+        capture = open_capture(probe)
+        okay, frame = capture.read() if capture.isOpened() else (False, None)
+        capture.release()
+        results.append((index, None if not okay or frame is None else frame.shape[1::-1]))
+    return results
 
 
 def readonly(array):
@@ -45,15 +87,42 @@ def calibration_image(width, height):
     return canvas
 
 
-def find_calibration(frame, width, height):
+def marker_image(frame, clip_limit=MARKER_CLIP_LIMIT, tiles=MARKER_TILES):
+    """Equalize locally. A projector on a lit whiteboard can separate its own black from its own
+    white by only a few gray levels, which plain adaptive thresholding cannot recover."""
+    gray = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if clip_limit <= 0:
+        return gray
+    size = max(1, int(tiles))
+    return cv2.createCLAHE(clipLimit=float(clip_limit), tileGridSize=(size, size)).apply(gray)
+
+
+def detect_markers(frame, clip_limit=MARKER_CLIP_LIMIT, tiles=MARKER_TILES):
+    """Return unambiguous marker corners by ID; a duplicated ID is reported as absent."""
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
     parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    corners, ids, rejected = cv2.aruco.ArucoDetector(dictionary, parameters).detectMarkers(frame)
+    detector = cv2.aruco.ArucoDetector(dictionary, parameters)
+    corners, ids, rejected = detector.detectMarkers(marker_image(frame, clip_limit, tiles))
     if ids is None:
-        return None
-    found = {int(number): points.reshape(4, 2) for number, points in zip(ids.flatten(), corners)}
-    if any(list(ids.flatten()).count(number) != 1 for number in range(4)):
+        return {}
+    numbers = list(ids.flatten())
+    return {int(number): points.reshape(4, 2) for number, points in zip(numbers, corners)
+            if numbers.count(number) == 1}
+
+
+def marker_message(found):
+    """Name the corners the camera is missing so the operator can aim without a laptop."""
+    missing = [number for number in range(4) if number not in found]
+    if not missing:
+        return "All four markers seen but the mapping was rejected; reduce glare and keep everything still"
+    names = ", ".join(CORNER_NAMES[number] for number in missing)
+    return f"Show all four calibration markers; missing {names}"
+
+
+def homography(found, width, height):
+    """Map camera pixels to logical display pixels from the sixteen marker corners."""
+    if any(number not in found for number in range(4)):
         return None
     source = np.concatenate([found[number] for number in range(4)])
     destination = np.concatenate(list(marker_layout(width, height).values()))
@@ -66,6 +135,35 @@ def find_calibration(frame, width, height):
     if abs(np.linalg.det(matrix)) < 1e-9:
         return None
     return matrix
+
+
+def find_calibration(frame, width, height, clip_limit=MARKER_CLIP_LIMIT, tiles=MARKER_TILES):
+    return homography(detect_markers(frame, clip_limit, tiles), width, height)
+
+
+@dataclass
+class MarkerMemory:
+    """Gather marker sightings over a short window.
+
+    A dim projector on a lit whiteboard can leave individual markers below the detector's
+    threshold on any single frame while the rig itself is motionless. Remembering each
+    marker's most recent corners lets one calibration succeed from several frames. A rig
+    that actually moves during the window mixes poses, which the reprojection limit in
+    homography() rejects rather than accepting a wrong mapping.
+    """
+
+    memory_seconds: float = MARKER_MEMORY_SECONDS
+    corners: dict = field(default_factory=dict)
+
+    def clear(self):
+        self.corners = {}
+
+    def update(self, found, timestamp):
+        for number, points in found.items():
+            self.corners[number] = (timestamp, points)
+        self.corners = {number: entry for number, entry in self.corners.items()
+                        if 0 <= timestamp - entry[0] <= self.memory_seconds}
+        return {number: entry[1] for number, entry in self.corners.items()}
 
 
 def save_calibration(path, matrix, camera_shape, display_shape):
@@ -246,6 +344,7 @@ class Vision:
     camera_shape: tuple | None = field(default=None, init=False)
     tracker: LaserTracker = field(default_factory=LaserTracker, init=False)
     wall_filter: WallFilter = field(default_factory=WallFilter, init=False)
+    marker_memory: MarkerMemory = field(default_factory=MarkerMemory, init=False)
     walls: np.ndarray | None = field(default=None, init=False)
     last_wall_time: float = field(default=0.0, init=False)
     wall_resume: float = field(default=0.0, init=False)
@@ -299,6 +398,7 @@ class Vision:
     def begin_calibration(self):
         with self.lock:
             self.calibration_generation += 1
+            self.marker_memory.clear()
             self.calibration_requested.set()
             previous = self.latest
             self.latest = VisionSnapshot(previous.timestamp, MappingProxyType({}), MappingProxyType({}),
@@ -308,6 +408,7 @@ class Vision:
         """Cancel pending detection, retain the usable map, and let projected markers clear."""
         with self.lock:
             self.calibration_generation += 1
+            self.marker_memory.clear()
             self.calibration_requested.clear()
             self.wall_resume = max(self.wall_resume, monotonic() + 0.5)
             self.tracking_reset.set()
@@ -344,16 +445,11 @@ class Vision:
         while not self.stopping.is_set():
             capture = None
             try:
-                capture = cv2.VideoCapture(camera.get("device", 0), cv2.CAP_V4L2)
+                capture = open_capture(self.config)
                 self.capture = capture
                 if not capture.isOpened():
-                    self.report_error("Camera unavailable; retrying", camera_failure=True)
+                    self.report_error(f"Camera {camera.get('device', 0)} unavailable; retrying", camera_failure=True)
                 else:
-                    capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera.get("width", 1280)))
-                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera.get("height", 720)))
-                    capture.set(cv2.CAP_PROP_FPS, float(camera.get("fps", 30)))
-                    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     while not self.stopping.is_set():
                         okay, frame = capture.read()
                         timestamp = monotonic()
@@ -426,14 +522,19 @@ class Vision:
                 self.calibration_warning = "Saved calibration invalid or size changed; recalibrate"
         preview = readonly(frame)
         if calibrating:
-            matrix = find_calibration(frame, width, height)
+            clip = float(camera.get("marker_clip_limit", MARKER_CLIP_LIMIT))
+            tiles = int(camera.get("marker_tiles", MARKER_TILES))
+            self.marker_memory.memory_seconds = float(camera.get("marker_memory_seconds", MARKER_MEMORY_SECONDS))
+            found = self.marker_memory.update(detect_markers(frame, clip, tiles), timestamp)
+            matrix = homography(found, width, height)
             with self.lock:
                 if generation != self.calibration_generation:
                     return self.latest
                 if matrix is None:
                     return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), self.walls,
-                                          preview, False, "Show all four calibration markers")
+                                          preview, False, marker_message(found))
                 self.matrix = matrix
+                self.marker_memory.clear()
                 self.tracker.tracks.clear()
                 self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
                 self.walls = None
