@@ -129,30 +129,74 @@ def prop_rect(prop):
     return pygame.FRect(prop.pos.x - prop.size[0] / 2, prop.pos.y - prop.size[1] / 2, *prop.size)
 
 
-def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf):
-    """Find bright regions fully enclosed by ink. Returns (ink plus interiors, shapes).
+def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
+    """Find regions enclosed by ink. Returns (ink plus interiors, shapes).
 
-    Small breaks in an outline are bridged only for the enclosure test. Regions
-    touching the board edge are open water, and enclosures above max_area stay
+    A hand-drawn outline almost never closes, and a camera breaks it further wherever the
+    pen ran dry, so demanding a watertight loop filled almost nothing of a real board.
+    Ink is instead grown outward at increasing radii and an enclosure is taken at the
+    first radius that reveals it, provided the bridged gap stays small beside the
+    enclosure's own size: at most `closure` of its linear extent.
+
+    That ratio is the whole judgement, and it is what separates a circle with a pen lift
+    from a letter C. Both are rings with a gap; only one has a gap small compared to what
+    it surrounds, and an absolute pixel tolerance cannot tell them apart because a large
+    shape may be missing far more ink than a small one and still plainly be a container.
+
+    Ink is grown rather than closed. A morphological closing joins two stroke ends when
+    dilated, then severs them again when eroded, so it needs a radius several times the
+    gap it is bridging and the ratio stops meaning anything. One distance transform of the
+    background serves every radius, which is also what makes this affordable.
+
+    Regions touching the board edge are open water, and enclosures above max_area stay
     hollow so an arena outline cannot turn the whole board solid.
     """
     ink = walls.astype(np.uint8)
-    if gap > 1:
-        ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (gap, gap)))
-    contours, hierarchy = cv2.findContours(ink, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    distance = cv2.distanceTransform((ink == 0).astype(np.uint8), cv2.DIST_L2, 3)
     interior = np.zeros_like(ink)
+    accepted = np.zeros_like(ink)
     shapes = []
-    for contour, links in zip(contours, hierarchy[0] if hierarchy is not None else []):
-        if links[3] < 0 or not min_area <= cv2.contourArea(contour) <= max_area:
-            continue
-        center, (across, along), degrees = cv2.minAreaRect(contour)
-        if across > along:
-            across, along, degrees = along, across, degrees - 90
-        ratio = along / max(across, 1)
-        # minAreaRect's angle belongs to its first side; the grain follows the long side.
-        shapes.append(Shape("log" if ratio >= 2 else "rock", contour, center,
-                            math.radians(degrees + 90) % math.pi, ratio))
-        cv2.drawContours(interior, [contour], -1, 1, -1)
+    # Beyond this no radius can satisfy the ratio, whatever it might enclose.
+    reach = closure * math.sqrt(min(max_area, float(walls.size))) / 2
+    radii, step = [0], max(1, int(gap) // 2)
+    while step <= reach:
+        radii.append(step)
+        step *= 2
+    for radius in radii:
+        grown = (distance <= radius).astype(np.uint8)
+        contours, hierarchy = cv2.findContours(grown, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        fresh = np.zeros_like(ink)
+        for contour, links in zip(contours, hierarchy[0] if hierarchy is not None else []):
+            if links[3] < 0:
+                continue
+            area = cv2.contourArea(contour)
+            if not min_area <= area <= max_area:
+                continue
+            # The hole was measured after the ink grew inward, so add the growth back.
+            extent = math.sqrt(area) + 2 * radius
+            if 2 * radius > closure * extent:
+                continue
+            moments = cv2.moments(contour)
+            if moments["m00"] <= 0:
+                continue
+            x = min(max(int(moments["m10"] / moments["m00"]), 0), ink.shape[1] - 1)
+            y = min(max(int(moments["m01"] / moments["m00"]), 0), ink.shape[0] - 1)
+            if accepted[y, x]:
+                continue
+            center, (across, along), degrees = cv2.minAreaRect(contour)
+            if across > along:
+                across, along, degrees = along, across, degrees - 90
+            ratio = along / max(across, 1)
+            # minAreaRect's angle belongs to its first side; the grain follows the long side.
+            shapes.append(Shape("log" if ratio >= 2 else "rock", contour, center,
+                                math.radians(degrees + 90) % math.pi, ratio))
+            cv2.drawContours(fresh, [contour], -1, 1, -1)
+        if radius and fresh.any():
+            span = 2 * radius + 1
+            fresh = cv2.dilate(fresh, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
+        # Only once a radius completes, so one pass can take concentric enclosures both.
+        interior |= fresh
+        accepted |= fresh
     return walls | interior.astype(bool), shapes
 
 
@@ -275,8 +319,9 @@ class Game:
         shapes = []
         if walls is not None:
             walls, shapes = closed_shapes(walls, round(self.setting("shape_gap", 5) * self.scale),
-                                          self.setting("shape_min_area", 400) * self.scale ** 2,
-                                          self.setting("shape_max_fraction", .25) * self.width * self.height)
+                                          self.setting("shape_min_area", 1200) * self.scale ** 2,
+                                          self.setting("shape_max_fraction", .25) * self.width * self.height,
+                                          self.setting("shape_closure", .45))
         for shape in shapes:
             # Camera jitter must not flip a fill between log and rock or wobble its grain.
             for old in self.shapes:

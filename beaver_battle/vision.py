@@ -29,7 +29,8 @@ MARKER_CLIP_LIMIT = 8.0
 MARKER_TILES = 16
 MARKER_MEMORY_SECONDS = 2.0
 WALL_THRESHOLD = 75
-WALL_CONTRAST = 30
+WALL_CONTRAST = 20
+WALL_FAINT = 9
 WALL_STROKE = 21
 OBSTACLE_THRESHOLD = 40
 OBSTACLE_MIN_AREA = 900
@@ -228,7 +229,19 @@ def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180):
             if np.isfinite(point).all() and 0 <= point[0] < width and 0 <= point[1] < height]
 
 
-def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WALL_STROKE):
+def grow(seed, region):
+    """Keep every part of region that touches a seed, and nothing that does not."""
+    count, labels = cv2.connectedComponents(region.astype(np.uint8), connectivity=8)
+    if count <= 1:
+        return np.zeros(region.shape, bool)
+    keep = np.zeros(count, bool)
+    keep[labels[seed]] = True
+    keep[0] = False
+    return keep[labels]
+
+
+def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WALL_STROKE,
+             faint=WALL_FAINT):
     """Mark physical ink: pixels darker than the board immediately around them.
 
     An absolute cutoff alone cannot find a drawing on a projected surface. Measured on the
@@ -250,18 +263,26 @@ def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WA
     size = max(3, int(stroke) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
     relief = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
-    return (relief >= int(contrast)) | (gray < int(threshold))
+    solid = gray < int(threshold)
+    strong = (relief >= int(contrast)) | solid
+    if faint is None or int(faint) >= int(contrast):
+        return strong
+    # One threshold breaks a hand-drawn stroke into dashes wherever the pen ran dry, and a
+    # barrier with gaps wider than a hull is not a barrier. Let confident ink recruit the
+    # faint ink joined to it, while faint marks standing alone are still rejected.
+    weak = (relief >= int(faint)) | solid
+    return grow(strong, weak)
 
 
 def scan_board(warped, width, height, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST,
-               stroke=WALL_STROKE):
+               stroke=WALL_STROKE, faint=WALL_FAINT):
     """Read the drawing from the calibration screen, whose bright field is known.
 
     This is the cleanest observation of physical ink the rig ever gets: the projector is
     showing a flat white field rather than game art, so anything locally dark is on the
     board. The four projected markers are dark by construction and are excluded.
     """
-    mask = ink_mask(warped, threshold, contrast, stroke)
+    mask = ink_mask(warped, threshold, contrast, stroke, faint)
     margin = max(3, int(stroke))
     for corners in marker_layout(width, height).values():
         left, top = corners[0].astype(int) - margin
@@ -522,7 +543,8 @@ class Vision:
         camera = self.config.get("camera", {})
         return (int(camera.get("wall_threshold", WALL_THRESHOLD)),
                 int(camera.get("wall_contrast", WALL_CONTRAST)),
-                int(camera.get("wall_stroke", WALL_STROKE)))
+                int(camera.get("wall_stroke", WALL_STROKE)),
+                int(camera.get("wall_faint", WALL_FAINT)))
 
     def dimensions(self):
         display = self.config.get("display", {})
