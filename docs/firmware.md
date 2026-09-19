@@ -92,7 +92,11 @@ sdkconfig; shared defaults remain GPIO27/GPIO32 for earlier controllers.
 The servo is always disabled, and
 the test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
 TEST** and logs `LASER GPIO25 ON` / `LASER GPIO25 OFF` transitions alongside
-button events. Disable this option and rebuild/flash to restore normal game
+button events. Every 500 ms, `BUTTON STATUS` also reports both raw GPIO levels
+(0 means pressed, 1 released), debounced button states, and commanded laser
+state. This heartbeat confirms the firmware is running even without button
+transitions; laser state is a software command, not measured optical output.
+Disable this option and rebuild/flash to restore normal game
 operation and its laptop-controlled laser lease. The option defaults off in
 the shared project; a board's ignored local sdkconfig can enable it for testing.
 

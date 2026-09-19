@@ -146,6 +146,7 @@ static void laser_button_test(void)
     bool laser = false;
     bool previous_pulse = false;
     uint64_t pulse_started = 0;
+    uint64_t next_status_ms = 0;
     TickType_t wake_tick = xTaskGetTickCount();
     ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; servo disabled; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
     ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
@@ -161,6 +162,13 @@ static void laser_button_test(void)
             output_update(requested, false);
             laser = requested;
             ESP_LOGI(log_tag, "LASER GPIO%d %s", LASER_GPIO, laser ? "ON" : "OFF");
+        }
+        if (now >= next_status_ms) {
+            ESP_LOGI(log_tag, "BUTTON STATUS: D%d raw=%d %s | D%d raw=%d %s | D%d laser=%s (raw 0=pressed, 1=released)",
+                     FIRE_GPIO, gpio_get_level(FIRE_GPIO), fire.pressed ? "PRESSED" : "released",
+                     SPECIAL_GPIO, gpio_get_level(SPECIAL_GPIO), special.pressed ? "PRESSED" : "released",
+                     LASER_GPIO, laser ? "ON" : "OFF");
+            next_status_ms = now + 500;
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
     }
