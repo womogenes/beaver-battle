@@ -114,6 +114,8 @@ def main():
     parser.add_argument('--list-displays', action='store_true', help='list connected outputs without starting camera or controllers')
     parser.add_argument('--list-cameras', action='store_true', help='probe camera indices without opening a window')
     parser.add_argument('--camera', type=int, help='camera device index from --list-cameras')
+    parser.add_argument('--bench', type=int, choices=(2, 3), metavar='N',
+                        help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
@@ -201,7 +203,8 @@ def main():
 
     try:
         if not args.simulate:
-            bridge.start()
+            if not args.bench:
+                bridge.start()
             vision.start()
             if mode == 'calibration':
                 vision.begin_calibration()
@@ -243,6 +246,11 @@ def main():
                 pressed = pygame.mouse.get_pressed(3)
                 inputs = simulated_inputs(config, elapsed, mouse, (pressed[0], pressed[2]), ids)
                 active_ids = ids
+            elif args.bench:
+                snapshot = vision.snapshot()
+                walls = snapshot.walls
+                active_ids = list(range(1, args.bench + 1))
+                inputs = simulated_inputs(config, elapsed, None, (False, False), active_ids)
             else:
                 bridge.poll(now)
                 snapshot = vision.snapshot()
@@ -254,9 +262,10 @@ def main():
             host = min(active_ids, default=1)
             host_input = inputs.get(host, PlayerInput(host, connected=False))
             old_fire, old_special = previous.get(host, (False, False))
-            cycle = key_cycle or (not args.simulate and host_input.fire and not old_fire)
-            confirm = key_confirm or (not args.simulate and host_input.special and not old_special)
-            if mode in ('game', 'ready', 'countdown', 'calibration') and host_input.fire and host_input.special and not args.simulate:
+            driven = args.simulate or args.bench
+            cycle = key_cycle or (not driven and host_input.fire and not old_fire)
+            confirm = key_confirm or (not driven and host_input.special and not old_special)
+            if mode in ('game', 'ready', 'countdown', 'calibration') and host_input.fire and host_input.special and not driven:
                 both_since = now if both_since is None else both_since
                 if now - both_since >= 1:
                     if mode == 'calibration':
@@ -304,14 +313,18 @@ def main():
                     game.new_match(ids, walls)
                     mode, countdown_until = 'countdown', elapsed + 3.0
             elif mode == 'countdown':
-                if any(player_id not in active_ids for player_id in ids):
+                if not args.bench and any(player_id not in active_ids for player_id in ids):
                     mode, ready = 'ready', set()
                 elif elapsed >= countdown_until:
                     mode, accumulator = 'game', 0.0
             elif mode == 'calibration' and snapshot.calibrated:
                 mode, selection, menu_message = 'lobby', 0, 'Calibration saved.'
+            if args.bench and mode == 'lobby' and snapshot.calibrated:
+                ids = active_ids
+                game.new_match(ids, walls)
+                mode, countdown_until, menu_message = 'countdown', elapsed + 3.0, ''
             if mode == 'game' and not args.simulate:
-                if any(player_id not in active_ids for player_id in ids):
+                if not args.bench and any(player_id not in active_ids for player_id in ids):
                     mode, selection, status = 'pause', 0, 'Controller disconnected. Reconnect, then resume.'
                 elif now - snapshot.timestamp > config['camera']['stale_seconds'] or not snapshot.calibrated:
                     mode, selection, status = 'pause', 0, 'Camera tracking unavailable. Restore camera or calibrate.'
