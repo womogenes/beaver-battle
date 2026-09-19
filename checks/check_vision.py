@@ -12,9 +12,9 @@ import numpy as np
 
 from beaver_battle.vision import (LaserTracker, MarkerMemory, Vision, WallFilter,
                                   calibration_image, capture_backend, detect_markers,
-                                  find_calibration, ink_mask, laser_candidates,
-                                  load_calibration, marker_layout, marker_message,
-                                  save_calibration, scan_board)
+                                  expected_board, find_calibration, ink_mask, laser_candidates,
+                                  load_calibration, marker_layout, marker_message, obstacles,
+                                  projector_gain, save_calibration, scan_board)
 
 
 def check_calibration():
@@ -127,6 +127,76 @@ def check_scan():
     assert np.array_equal(published, scanned), "A board scan is adopted without repeat confirmation"
     assert not published.flags.writeable
     assert np.array_equal(seeded.update(scanned), scanned), "A confirming frame keeps the scan"
+
+
+def check_obstacles():
+    """Hands and shadows are light that went missing, which needs the projected frame to see."""
+    width, height = 1280, 720
+    gain = np.float32([28, 20, 17])
+    board = lit_board(width, height).astype(np.float32)
+    reference = board.copy()
+
+    # The game is projecting pastel art with dark outlines and a near-black eye.
+    canvas = np.full((height, width, 3), 255, np.uint8)
+    cv2.circle(canvas, (900, 300), 120, (240, 218, 180), -1)
+    cv2.circle(canvas, (900, 300), 120, (170, 98, 88), 6)
+    cv2.circle(canvas, (880, 270), 12, (96, 64, 66), -1)
+    cv2.putText(canvas, "PLAYER 1", (120, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (135, 105, 90), 5)
+    lit = expected_board(reference, gain, canvas)
+    assert not obstacles(lit.astype(np.uint8), reference, gain, canvas).any(), \
+        "Projected artwork is predicted away, however dark it is drawn"
+
+    # A hand blocks the beam over part of that art and reflects less than the board.
+    shadowed = lit.copy()
+    hand = np.zeros((height, width), np.uint8)
+    cv2.ellipse(hand, (500, 420), (90, 130), 20, 0, 360, 1, -1)
+    shadowed[hand.astype(bool)] -= gain            # the projector's light never lands
+    shadowed[hand.astype(bool)] -= np.float32([30, 22, 6])   # and skin is not a whiteboard
+    found = obstacles(np.clip(shadowed, 0, 255).astype(np.uint8), reference, gain, canvas)
+    covered = float((found & hand.astype(bool)).sum()) / float(hand.sum())
+    assert covered > 0.8, f"A hand over the beam must become solid, covered {covered:.2f}"
+    assert int(found.sum()) - int((found & hand.astype(bool)).sum()) < hand.sum() // 5
+
+    # Erasing ink makes the board brighter than predicted, which is not an obstacle.
+    brighter = np.clip(lit + 60, 0, 255).astype(np.uint8)
+    assert not obstacles(brighter, reference, gain, canvas).any(), "Erasure must not add walls"
+
+    # A laser dot is small, and small things never become walls.
+    dot = lit.copy()
+    cv2.circle(dot, (700, 500), 4, (0, 0, 0), -1)
+    assert not obstacles(np.clip(dot, 0, 255).astype(np.uint8), reference, gain, canvas).any()
+
+    reading = np.full((height, width, 3), 200, np.uint8)
+    for corners in marker_layout(width, height).values():
+        left, top = corners[0].astype(int)
+        right, bottom = corners[2].astype(int)
+        reading[top:bottom + 1, left:right + 1] = 200 - gain.astype(np.uint8)
+    measured = projector_gain(reading.astype(np.float32), width, height,
+                              np.zeros((height, width), bool))
+    assert measured is not None and np.allclose(measured, gain, atol=2), measured
+    flat = np.full((height, width, 3), 200, np.float32)
+    assert projector_gain(flat, width, height, np.zeros((height, width), bool)) is None, \
+        "A screen with no visible markers cannot measure the projector"
+
+
+def check_projection_handover():
+    vision = Vision({"display": {"width": 64, "height": 48},
+                     "camera": {"calibration_file": "/tmp/no-calibration.npz", "projection_delay": 0.5}})
+    try:
+        vision.set_projection(np.zeros((10, 10, 3), np.uint8))
+        raise AssertionError("Projection size is not checked")
+    except ValueError:
+        pass
+    assert vision.projection_for(5.0) is None, "No projection published yet"
+    for index, moment in enumerate((2.0, 2.5, 3.0)):
+        vision.set_projection(np.full((48, 64, 3), index * 10, np.uint8), moment)
+    # A frame captured at 3.0 saw what was on the board half a second earlier, not the newest draw.
+    assert int(vision.projection_for(3.0)[0, 0, 0]) == 10, "Projection delay must be applied"
+    assert int(vision.projection_for(3.6)[0, 0, 0]) == 20
+    rgb = np.zeros((48, 64, 3), np.uint8)
+    rgb[:, :, 0] = 255
+    vision.set_projection(rgb, 9.0)
+    assert int(vision.projection_for(9.1)[0, 0, 2]) == 255, "Projection arrives as RGB, stored as BGR"
 
 
 def check_backend():
@@ -401,6 +471,8 @@ def check_worker():
 check_calibration()
 check_ink()
 check_scan()
+check_obstacles()
+check_projection_handover()
 check_marker_memory()
 check_backend()
 check_candidates()
@@ -409,5 +481,5 @@ check_walls()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, drawn ink and board scan, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, drawn ink and board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")

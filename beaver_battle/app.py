@@ -190,6 +190,7 @@ def main():
     previous = {}
     both_since = None
     countdown_until = 0.0
+    projection_due = 0.0
     menu_message = ''
     status = ''
     preview = False
@@ -367,6 +368,11 @@ def main():
                 image = pygame.surfarray.make_surface(np.transpose(image, (1, 0, 2)))
                 screen.blit(pygame.transform.smoothscale(image, (width // 4, height // 4)), (width * 3 // 4, 0))
             pygame.display.flip()
+            # Vision needs what we just projected to tell a shadow from dark artwork.
+            # Reading the framebuffer costs real time, so only at the wall update rate.
+            if not args.simulate and mode in ('game', 'countdown') and now >= projection_due:
+                projection_due = now + 1 / max(1.0, float(config['camera'].get('wall_update_hz', 10)))
+                vision.set_projection(np.transpose(pygame.surfarray.array3d(screen), (1, 0, 2)), now)
             previous = {player_id: (value.fire, value.special) for player_id, value in inputs.items()}
             if args.seconds and elapsed >= args.seconds:
                 running = False

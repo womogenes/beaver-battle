@@ -5,6 +5,7 @@ No camera control (exposure, gain, white balance) is changed by this module.
 """
 
 import platform
+from collections import deque
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
@@ -27,6 +28,9 @@ MARKER_MEMORY_SECONDS = 2.0
 WALL_THRESHOLD = 75
 WALL_CONTRAST = 30
 WALL_STROKE = 21
+OBSTACLE_THRESHOLD = 40
+OBSTACLE_MIN_AREA = 900
+PROJECTION_DELAY = 0.12
 
 
 def capture_backend(name=""):
@@ -241,6 +245,55 @@ def scan_board(warped, width, height, threshold=WALL_THRESHOLD, contrast=WALL_CO
     return mask
 
 
+def projector_gain(reference, width, height, ink):
+    """How many camera levels the projector itself is worth, per channel.
+
+    The calibration screen conveniently shows both extremes at once: a white field and
+    four black markers. Their difference is exactly the projector's contribution, which is
+    what has to be predicted away before a shadow can be told apart from dark artwork.
+    """
+    dark = np.zeros((height, width), bool)
+    for corners in marker_layout(width, height).values():
+        inset = max(2, min(width, height) // 90)
+        left, top = corners[0].astype(int) + inset
+        right, bottom = corners[2].astype(int) - inset
+        dark[max(0, top):max(0, bottom), max(0, left):max(0, right)] = True
+    lit = ~dark & ~ink
+    if dark.sum() < 64 or lit.sum() < 64:
+        return None
+    gain = np.median(reference[lit], 0) - np.median(reference[dark], 0)
+    return gain.astype(np.float32) if np.all(gain > 1) else None
+
+
+def expected_board(reference, gain, canvas):
+    """What the board should look like given the frame currently being projected onto it."""
+    return reference - gain * (1.0 - canvas.astype(np.float32) / 255.0)
+
+
+def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
+              min_area=OBSTACLE_MIN_AREA, blur=3.0):
+    """Find hands, shadows and placed objects: the board is darker than the projection predicts.
+
+    Absolute darkness cannot answer this. A hand blocking the beam and a deliberately dark
+    sprite look identical to the camera, and on a lit whiteboard the pastel palette moves
+    individual channels further than a hand does. Subtracting the predicted image removes
+    the artwork and leaves only light that something physically took away.
+
+    Both sides are blurred because projector latency and sub-pixel warp error otherwise
+    ring at every moving edge, and small components are dropped so that laser dots and
+    sensor noise cannot become walls.
+    """
+    expected = cv2.GaussianBlur(expected_board(reference, gain, canvas), (0, 0), blur)
+    observed = cv2.GaussianBlur(warped.astype(np.float32), (0, 0), blur)
+    deficit = np.max(expected - observed, axis=2)
+    mask = (deficit > float(threshold)).astype(np.uint8)
+    count, labels, stats, centers = cv2.connectedComponentsWithStats(mask, 8)
+    keep = np.zeros(count, bool)
+    for index in range(1, count):
+        keep[index] = stats[index, cv2.CC_STAT_AREA] >= int(min_area)
+    return keep[labels]
+
+
 @dataclass
 class WallFilter:
     persistence: int = 3
@@ -391,12 +444,43 @@ class Vision:
     tracker: LaserTracker = field(default_factory=LaserTracker, init=False)
     wall_filter: WallFilter = field(default_factory=WallFilter, init=False)
     marker_memory: MarkerMemory = field(default_factory=MarkerMemory, init=False)
+    board_reference: np.ndarray | None = field(default=None, init=False)
+    board_gain: np.ndarray | None = field(default=None, init=False)
+    projections: deque = field(default_factory=lambda: deque(maxlen=16), init=False)
     walls: np.ndarray | None = field(default=None, init=False)
     last_wall_time: float = field(default=0.0, init=False)
     wall_resume: float = field(default=0.0, init=False)
     calibration_warning: str = field(default="", init=False)
     calibration_canvas: np.ndarray | None = field(default=None, init=False)
     capture_error: str = field(default="", init=False)
+
+    def set_projection(self, canvas, timestamp=None):
+        """Hand over the frame just drawn, as an (h, w, 3) RGB array in logical pixels.
+
+        Without it the worker cannot tell a shadow from dark artwork and reports drawn ink
+        only. Calling it is optional; the game loop should, headless checks need not.
+        """
+        canvas = np.asarray(canvas)
+        width, height = self.dimensions()
+        if canvas.shape != (height, width, 3):
+            raise ValueError(f"Projection must be {height}x{width}x3 in logical pixels")
+        with self.lock:
+            self.projections.append((monotonic() if timestamp is None else float(timestamp),
+                                     canvas[:, :, ::-1].copy()))
+
+    def projection_for(self, timestamp):
+        """The frame that was actually on the board when this camera frame was taken."""
+        delay = float(self.config.get("camera", {}).get("projection_delay", PROJECTION_DELAY))
+        with self.lock:
+            if not self.projections:
+                return None
+            wanted = timestamp - delay
+            return min(self.projections, key=lambda item: abs(item[0] - wanted))[1]
+
+    def obstacle_settings(self):
+        camera = self.config.get("camera", {})
+        return (float(camera.get("obstacle_threshold", OBSTACLE_THRESHOLD)),
+                int(camera.get("obstacle_min_area", OBSTACLE_MIN_AREA)))
 
     def ink_settings(self):
         camera = self.config.get("camera", {})
@@ -590,7 +674,11 @@ class Vision:
                 self.tracker.tracks.clear()
                 self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
                 scan = cv2.warpPerspective(frame, matrix, (width, height), borderValue=(255, 255, 255))
-                self.walls = self.wall_filter.seed(scan_board(scan, width, height, *self.ink_settings()))
+                ink = scan_board(scan, width, height, *self.ink_settings())
+                self.walls = self.wall_filter.seed(ink)
+                self.board_reference = scan.astype(np.float32)
+                self.board_gain = projector_gain(self.board_reference, width, height, ink)
+                self.projections.clear()
                 self.last_wall_time = timestamp
                 self.wall_resume = timestamp + 0.5
                 self.calibration_warning = ""
@@ -612,6 +700,10 @@ class Vision:
         if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:
             warped = cv2.warpPerspective(frame, self.matrix, (width, height), borderValue=(255, 255, 255))
             dark = ink_mask(warped, *self.ink_settings())
+            canvas = self.projection_for(timestamp)
+            if canvas is not None and self.board_reference is not None and self.board_gain is not None:
+                dark = dark | obstacles(warped, self.board_reference, self.board_gain,
+                                        canvas, *self.obstacle_settings())
             with self.lock:
                 if generation != self.calibration_generation:
                     return self.latest
