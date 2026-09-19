@@ -80,6 +80,20 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ## Runtime behavior
 
+The serial monitor at 115200 baud reports every debounced button transition,
+including when Wi-Fi is unconfigured or disconnected. For example:
+
+```text
+I (1234) beaver: FIRE GPIO27 PRESSED
+I (1567) beaver: FIRE GPIO27 RELEASED
+I (2345) beaver: SPECIAL GPIO32 PRESSED
+I (2678) beaver: SPECIAL GPIO32 RELEASED
+```
+
+The timestamp is milliseconds since boot. Holding a button produces one press
+line; releasing it produces one release line. With no laptop connection the
+laser remains off, and the servo remains disabled with the default settings.
+
 The exact wire format is in [PROTOCOL.md](../PROTOCOL.md). The controller sends
 button state every 20 ms and immediately after debounced changes. It also sends
 an immediate acknowledgement after an accepted output command. Each boot has a

@@ -145,7 +145,11 @@ static void wifi_init(void)
     wifi_config_t configuration = {0};
     size_t ssid_length = strlen(CONFIG_BB_WIFI_SSID);
     size_t password_length = strlen(CONFIG_BB_WIFI_PASSWORD);
-    if (ssid_length == 0 || ssid_length > sizeof(configuration.sta.ssid) ||
+    if (ssid_length == 0) {
+        ESP_LOGI(log_tag, "Wi-Fi not configured; serial button testing is available");
+        return;
+    }
+    if (ssid_length > sizeof(configuration.sta.ssid) ||
         password_length > sizeof(configuration.sta.password)) {
         ESP_LOGE(log_tag, "Set valid Wi-Fi credentials in Beaver controller build settings");
         return;
@@ -214,6 +218,7 @@ void app_main(void)
     output_init();
     ESP_LOGI(log_tag, "Controller %d: laser off; servo %s", CONFIG_BB_CONTROLLER_ID,
              servo_enabled() ? "enabled at configured rest" : "disabled");
+    ESP_LOGI(log_tag, "Buttons: FIRE GPIO%d, SPECIAL GPIO%d; switches connect to GND", FIRE_GPIO, SPECIAL_GPIO);
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -240,8 +245,15 @@ void app_main(void)
     TickType_t wake_tick = xTaskGetTickCount();
     while (true) {
         uint64_t now = time_ms();
-        bool changed = button_update(&fire, gpio_get_level(FIRE_GPIO) == 0, now);
-        changed |= button_update(&special, gpio_get_level(SPECIAL_GPIO) == 0, now);
+        bool fire_changed = button_update(&fire, gpio_get_level(FIRE_GPIO) == 0, now);
+        bool special_changed = button_update(&special, gpio_get_level(SPECIAL_GPIO) == 0, now);
+        if (fire_changed) {
+            ESP_LOGI(log_tag, "FIRE GPIO%d %s", FIRE_GPIO, fire.pressed ? "PRESSED" : "RELEASED");
+        }
+        if (special_changed) {
+            ESP_LOGI(log_tag, "SPECIAL GPIO%d %s", SPECIAL_GPIO, special.pressed ? "PRESSED" : "RELEASED");
+        }
+        bool changed = fire_changed || special_changed;
         bool wifi_ready = (xEventGroupGetBits(wifi_events) & WIFI_READY) != 0;
         if (!wifi_ready) {
             controller_disconnect(&controller);
