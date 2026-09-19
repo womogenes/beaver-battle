@@ -343,7 +343,9 @@ def main():
                 accumulator = 0
             if mode == 'calibration':
                 vision.draw_calibration(screen)
-                text_line('Keep all four markers in view. Hold both buttons to cancel.', height // 2 + 60)
+                # Name the corner that is blocked, on the board, where the operator is standing.
+                text_line(snapshot.error or 'Keep all four markers in view', height // 2 + 60)
+                text_line('Keep ink and hands out of the four corners. Hold both buttons to cancel.', height // 2 + 96)
             elif mode in ('game', 'countdown'):
                 game.draw(screen)
                 if mode == 'countdown':

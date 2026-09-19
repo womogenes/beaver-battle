@@ -21,7 +21,10 @@ from beaver_battle.model import VisionSnapshot
 
 BACKENDS = {"avfoundation": cv2.CAP_AVFOUNDATION, "v4l2": cv2.CAP_V4L2,
             "dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
-CORNER_NAMES = {0: "top-left", 1: "top-right", 2: "bottom-right", 3: "bottom-left"}
+MARKER_NAMES = {0: "top-left", 1: "top-centre", 2: "top-right", 3: "left", 4: "centre",
+                5: "right", 6: "bottom-left", 7: "bottom-centre", 8: "bottom-right"}
+MARKER_MINIMUM = 3
+MARKER_SPREAD = 0.45
 MARKER_CLIP_LIMIT = 8.0
 MARKER_TILES = 16
 MARKER_MEMORY_SECONDS = 2.0
@@ -73,11 +76,12 @@ def readonly(array):
 
 
 def marker_layout(width, height):
+    """Nine markers on a three by three grid, so covering one does not stop calibration."""
     size = max(24, min(width, height) // 7)
     margin = max(12, size // 3)
-    origins = [(margin, margin), (width - margin - size, margin),
-               (width - margin - size, height - margin - size),
-               (margin, height - margin - size)]
+    xs = (margin, (width - size) // 2, width - margin - size)
+    ys = (margin, (height - size) // 2, height - margin - size)
+    origins = [(x, y) for y in ys for x in xs]
     return {number: np.float32([(x, y), (x + size - 1, y),
                                (x + size - 1, y + size - 1), (x, y + size - 1)])
             for number, (x, y) in enumerate(origins)}
@@ -119,22 +123,37 @@ def detect_markers(frame, clip_limit=MARKER_CLIP_LIMIT, tiles=MARKER_TILES):
 
 
 def marker_message(found):
-    """Name the corners the camera is missing so the operator can aim without a laptop."""
-    missing = [number for number in range(4) if number not in found]
-    if not missing:
-        return "All four markers seen but the mapping was rejected; reduce glare and keep everything still"
-    names = ", ".join(CORNER_NAMES[number] for number in missing)
-    return f"Show all four calibration markers; missing {names}"
+    """Say what is blocked, on the board, where whoever can fix it is standing."""
+    layout = sorted(MARKER_NAMES)
+    missing = [MARKER_NAMES[number] for number in layout if number not in found]
+    if len(found) >= MARKER_MINIMUM:
+        return (f"{len(found)} of {len(layout)} markers seen but the mapping was rejected; "
+                "spread them wider, reduce glare, and keep everything still")
+    return (f"Calibration needs {MARKER_MINIMUM} of {len(layout)} markers and sees {len(found)}. "
+            f"Erase ink or clear objects off: {', '.join(missing[:4])}")
 
 
 def homography(found, width, height):
-    """Map camera pixels to logical display pixels from the sixteen marker corners."""
-    if any(number not in found for number in range(4)):
+    """Map camera pixels to logical display pixels from whatever markers are readable.
+
+    Each marker contributes four corners of a known square, so a mapping needs far fewer
+    than all nine. What it does need is reach: markers bunched into one part of the board
+    fix that part well and extrapolate badly across the rest, which no reprojection check
+    on the markers themselves would catch. Hence a span requirement as well as a count.
+    """
+    layout = marker_layout(width, height)
+    usable = [number for number in sorted(layout) if number in found]
+    if len(usable) < MARKER_MINIMUM:
         return None
-    source = np.concatenate([found[number] for number in range(4)])
-    destination = np.concatenate(list(marker_layout(width, height).values()))
+    centers = np.float32([found[number].mean(axis=0) for number in usable])
+    targets = np.float32([layout[number].mean(axis=0) for number in usable])
+    span = targets.max(axis=0) - targets.min(axis=0)
+    if span[0] < MARKER_SPREAD * width or span[1] < MARKER_SPREAD * height:
+        return None
+    source = np.concatenate([found[number] for number in usable])
+    destination = np.concatenate([layout[number] for number in usable])
     matrix, inliers = cv2.findHomography(source, destination, cv2.RANSAC, 3.0)
-    if matrix is None or inliers is None or int(inliers.sum()) < 14:
+    if matrix is None or inliers is None or int(inliers.sum()) < 4 * len(usable) - 2:
         return None
     projected = cv2.perspectiveTransform(source[None], matrix)[0]
     if not np.isfinite(matrix).all() or np.max(np.linalg.norm(projected - destination, axis=1)) > 5:

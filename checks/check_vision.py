@@ -12,9 +12,10 @@ import numpy as np
 
 from beaver_battle.vision import (LaserTracker, MarkerMemory, Vision, WallFilter,
                                   calibration_image, capture_backend, detect_markers,
-                                  expected_board, find_calibration, ink_mask, laser_candidates,
-                                  load_calibration, marker_layout, marker_message, obstacles,
-                                  projector_gain, save_calibration, scan_board)
+                                  expected_board, find_calibration, homography, ink_mask,
+                                  laser_candidates, load_calibration, marker_layout,
+                                  marker_message, obstacles, projector_gain, save_calibration,
+                                  scan_board)
 
 
 def check_calibration():
@@ -25,19 +26,43 @@ def check_calibration():
     projection = cv2.getPerspectiveTransform(original, observed)
     camera = cv2.warpPerspective(image, projection, (1024, 720), borderValue=(190, 190, 190))
     matrix = find_calibration(camera, width, height)
-    assert matrix is not None, "Four projected markers must calibrate under perspective"
+    assert matrix is not None, "Projected markers must calibrate under perspective"
     targets = np.float32([(400, 240), (100, 100), (700, 400)])
     camera_points = cv2.perspectiveTransform(targets[None], projection)
     recovered = cv2.perspectiveTransform(camera_points, matrix)[0]
     assert np.max(np.linalg.norm(recovered - targets, axis=1)) < 2
-    assert "missing" not in marker_message(detect_markers(camera))
-    # A projector on a lit whiteboard can leave only a few gray levels between its black and white.
-    faint = (camera.astype(np.float32) * 0.06 + 160).astype(np.uint8)
-    assert len(detect_markers(faint, clip_limit=0)) < 4, "Faint markers need local equalization"
+# A projector on a lit whiteboard can leave only a few gray levels between its black and white.
+    faint = (camera.astype(np.float32) * 0.03 + 172).astype(np.uint8)
+    assert find_calibration(faint, width, height, clip_limit=0) is None, \
+        "A faint projection is unreadable without local equalization"
     assert find_calibration(faint, width, height) is not None, "Equalization must recover a faint projection"
-    camera[0:260, 0:330] = 190
-    assert find_calibration(camera, width, height) is None, "Missing a corner marker must not calibrate"
-    assert marker_message(detect_markers(camera)) == "Show all four calibration markers; missing top-left"
+
+    # Ink drawn over a marker destroys it. Losing one, or several, must not stop calibration.
+    blocked = camera.copy()
+    blocked[0:230, 0:300] = 190
+    assert len(detect_markers(blocked)) == 8
+    covered = find_calibration(blocked, width, height)
+    assert covered is not None, "One blocked marker must not stop calibration"
+    assert np.max(np.linalg.norm(cv2.perspectiveTransform(camera_points, covered)[0] - targets, axis=1)) < 3
+
+    # Spread matters more than count: markers bunched together extrapolate badly.
+    corner = {number: points for number, points in detect_markers(camera).items() if number in (0, 1, 3, 4)}
+    assert homography(corner, width, height) is None, "Clustered markers must not fix the whole board"
+    spread = {number: points for number, points in detect_markers(camera).items() if number in (0, 2, 8)}
+    assert homography(spread, width, height) is not None, "Three markers reaching across the board suffice"
+    assert homography({0: detect_markers(camera)[0]}, width, height) is None, "One marker is never enough"
+
+    lost = camera.copy()
+    lost[:, 0:620] = 190
+    assert find_calibration(lost, width, height) is None, "Losing a whole side must not calibrate"
+    clustered = marker_message(detect_markers(lost))
+    assert "spread them wider" in clustered, clustered
+
+    bare = camera.copy()
+    bare[:, 140:] = 190
+    assert find_calibration(bare, width, height) is None
+    sparse = marker_message(detect_markers(bare))
+    assert "Erase ink" in sparse and "needs 3 of 9" in sparse, sparse
     with TemporaryDirectory() as temporary:
         path = Path(temporary) / "calibration.npz"
         save_calibration(path, matrix, (720, 1024), (height, width))
@@ -64,10 +89,9 @@ def check_marker_memory():
     image = calibration_image(width, height)
     flicker = MarkerMemory()
     found = {}
-    for number in range(4):
+    for step, number in enumerate((0, 2, 6, 8)):
         single = {number: detect_markers(image)[number]}
-        found = flicker.update(single, 20.0 + number * 0.1)
-    from beaver_battle.vision import homography
+        found = flicker.update(single, 20.0 + step * 0.1)
     matrix = homography(found, width, height)
     assert matrix is not None, "Four markers seen one per frame must still calibrate"
     targets = np.float32([(400, 240), (100, 100), (700, 400)])
