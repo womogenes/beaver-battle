@@ -1,0 +1,54 @@
+[display]
+width = 1280
+height = 720
+fullscreen = false
+fps = 60
+
+[projector]
+ip = "10.31.171.250"
+name = "HY300PRO"
+transport = "miracast"
+
+[camera]
+device = 0
+width = 1280
+height = 720
+fps = 30
+calibration_file = "calibration.npz"
+wall_threshold = 75
+wall_update_hz = 10
+wall_persistence = 3
+laser_min_area = 1
+laser_max_area = 180
+identity_interval = 1.5
+identity_window = 0.18
+identity_settle = 0.08
+stale_seconds = 0.5
+
+[network]
+bind = "0.0.0.0"
+port = 4210
+timeout = 0.5
+
+[game]
+players = 3
+width = 1280
+height = 720
+canoe_speed = 240.0
+turn_speed = 240.0
+aim_deadzone = 24.0
+beaver_speed = 75.0
+beaver_boost_speed = 150.0
+shot_interval = 0.30
+magazine = 3
+reload_seconds = 2.5
+rock_speed = 650.0
+rock_lifetime = 2.0
+invulnerability = 0.8
+winning_score = 5
+round_delay = 3.0
+seed = 2026
+
+[feedback]
+enabled = true
+duration_ms = 200

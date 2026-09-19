@@ -1,0 +1,13 @@
+[project]
+name = "beaver-battle"
+version = "0.1.0"
+description = "A camera-tracked, projection-mapped canoe battle game"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=2,<3",
+  "opencv-contrib-python>=4.10,<5",
+  "pygame-ce>=2.5,<3",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+config.local.toml
+calibration.npz
+captures/
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+*.core
