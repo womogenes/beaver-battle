@@ -60,6 +60,7 @@ winning_score = 5
 stroke_link = 70 # Rejoin stroke fragments whose ends come this close, in logical pixels.
 stroke_min_piece = 40 # Fragments below this area are specks, not part of a stroke.
 stroke_width = 3 # Thickness of a repaired join.
+ink_width = 5 # Drawn width of an open stroke, so a barrier is visible as well as solid.
 shape_gap = 5 # Smallest gap-bridging radius tried when looking for enclosures.
 shape_min_area = 1200 # An arena below about a canoe's size is not worth filling.
 shape_closure = 0.20 # A gap may be this fraction of a shape's extent and still close it.

@@ -300,7 +300,6 @@ class Game:
     shape_art: list | None = None
     sticks: list = field(default_factory=list)
     loose_ink: np.ndarray | None = None
-    show_ink: bool = False
     pads: list = field(default_factory=list)
 
     def setting(self, name, default):
@@ -854,11 +853,16 @@ class Game:
             surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))
         if self.shape_art is None:
             self.shape_art = [self.shape_image(shape) for shape in self.shapes] + [self.stick_image(stick) for stick in self.sticks]
-            if self.show_ink and self.loose_ink is not None and self.loose_ink.any():
+            if self.loose_ink is not None and self.loose_ink.any():
+                # Every open stroke is solid, so every open stroke is drawn. A curve that
+                # blocks a canoe while staying invisible reads as the game ignoring it.
+                width = max(1, round(self.setting("ink_width", 5) * self.scale)) | 1
+                shown = cv2.dilate(self.loose_ink.astype(np.uint8),
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (width, width))).astype(bool)
                 ink = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
                 pixels, opacity = pygame.surfarray.pixels3d(ink), pygame.surfarray.pixels_alpha(ink)
-                pixels[self.loose_ink.T] = sprites.BARK_LINE
-                opacity[self.loose_ink.T] = 255
+                pixels[shown.T] = sprites.BARK_LINE
+                opacity[shown.T] = 255
                 del pixels, opacity
                 self.shape_art.append((ink, (0, 0)))
         surface.blits([(image, self.bob(index, topleft)) for index, (image, topleft) in enumerate(self.shape_art)])

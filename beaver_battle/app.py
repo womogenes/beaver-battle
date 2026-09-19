@@ -180,7 +180,6 @@ def main():
     mode = 'game' if args.simulate else ('calibration' if args.calibrate else 'lobby')
     ids = list(range(1, config['game']['players'] + 1))
     walls = simulated_walls(width, height) if args.simulate else None
-    game.show_ink = args.simulate
     snapshot = VisionSnapshot()
     elapsed = 0.0
     frame_count = 0

@@ -67,6 +67,8 @@ Every new mask is first repaired, then searched for enclosures.
 
 This repairs holes in a barrier. It does not close a barrier that was never closed: an open curve still leaves open water past each of its ends, and a canoe is entitled to sail round it. To divide the board, draw to the board's edge.
 
+Every open stroke is then drawn, at `game.ink_width`, whether or not it is straight. A long straight one is rendered as a stick and anything curved as a bark-coloured line following its own shape, but both are equally solid and both are equally visible. A stroke that blocks a canoe while staying invisible reads as the game ignoring the drawing, which is what a faint pen under a bright projector looks like from across the room.
+
 Then regions enclosed by ink are found (`closed_shapes` in `game.py`). Each enclosure is added to the solid mask, so outline plus interior collide exactly like ink, and the interior is projected with a bright texture: a long enclosure (minimum-area rectangle at least 2:1) is a log with grain along its long axis, anything rounder is a rock. `Game.walls` is ink plus interiors; `Game.shapes` lists the current enclosures.
 
 - A hand-drawn outline almost never closes, and the camera breaks it further wherever the pen ran dry, so requiring a watertight loop filled very little of a real board. Ink is grown outward at increasing radii and an enclosure is taken at the first radius that reveals it, provided the bridged gap is at most `game.shape_closure` of the enclosure's linear extent (default 0.20).
