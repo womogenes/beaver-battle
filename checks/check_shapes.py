@@ -7,7 +7,7 @@ shapes a whiteboard actually carries are checked one by one rather than by eye.
 import cv2
 import numpy as np
 
-from beaver_battle.game import closed_shapes
+from beaver_battle.game import closed_shapes, link_strokes
 from checks.board_shapes import CASES, HEIGHT, WIDTH, arc, blank
 
 MIN_AREA = 1200
@@ -63,6 +63,60 @@ def check_edge_and_size_limits():
     assert int(filled.sum()) < MAX_AREA
 
 
+def pieces(mask):
+    count, _ = cv2.connectedComponents(np.asarray(mask).astype(np.uint8), connectivity=8)
+    return count - 1
+
+
+def closest_separation(mask):
+    """The narrowest gap between a mask's own pieces: the widest way through a barrier."""
+    mask = np.asarray(mask).astype(np.uint8)
+    count, labels, _, _ = cv2.connectedComponentsWithStats(mask, 8)
+    if count <= 2:
+        return 0.0
+    spread = []
+    for index in range(1, count):
+        here = np.column_stack(np.nonzero(labels == index))
+        for other in range(index + 1, count):
+            there = np.column_stack(np.nonzero(labels == other))
+            spread.append(float(np.linalg.norm(here[:, None] - there[None], axis=2).min()))
+    return min(spread)
+
+
+def check_stroke_linking():
+    """A line drawn in one movement must hold as one barrier however the camera broke it."""
+    whole = blank()
+    points = np.array([[520, 120], [700, 200], [760, 340], [660, 470], [560, 560], [540, 660]])
+    cv2.polylines(whole, [points.reshape(-1, 1, 2)], False, 1, 3)
+    broken = whole.copy()
+    for low, high in ((205, 250), (400, 448), (520, 556)):
+        broken[low:high] = 0
+    assert pieces(broken) == 4, f"The cuts must really break the stroke, got {pieces(broken)}"
+    assert closest_separation(broken) > 36, "The breaks must be wide enough for a canoe"
+
+    linked = link_strokes(broken.astype(bool), 70)
+    assert pieces(linked) == 1, f"A broken stroke must rejoin, got {pieces(linked)} pieces"
+
+    assert pieces(link_strokes(whole.astype(bool), 70)) == 1
+    assert int(link_strokes(whole.astype(bool), 70).sum()) - int(whole.sum()) < 40, \
+        "A stroke that is already whole must not be thickened"
+
+    # Separate drawings stay separate, however tidily they sit beside each other.
+    apart = blank()
+    cv2.circle(apart, (250, 250), 60, 1, 3)
+    cv2.circle(apart, (250, 600), 60, 1, 3)
+    cv2.rectangle(apart, (800, 200), (1000, 400), 1, 3)
+    assert pieces(link_strokes(apart.astype(bool), 70)) == pieces(apart), \
+        "Drawings further apart than the reach must not be joined"
+
+    # Specks are not strokes and must not sprout bridges to whatever is near them.
+    speckled = whole.copy()
+    for at in ((300, 300), (330, 320), (360, 300)):
+        cv2.circle(speckled, at, 2, 1, -1)
+    joined = link_strokes(speckled.astype(bool), 70, min_piece=40)
+    assert int(joined.sum()) - int(speckled.sum()) < 40, "Specks must not be linked in"
+
+
 def check_cost():
     from time import perf_counter
     walls = CASES[6][1]().astype(bool)
@@ -75,9 +129,10 @@ def check_cost():
 
 
 check_cases()
+check_stroke_linking()
 check_gap_is_judged_against_size()
 check_filled_body_is_solid()
 check_edge_and_size_limits()
 check_cost()
-print(f"Shape checks passed: {len(CASES)} whiteboard cases, gap judged against shape size, "
-      "solid fills, edge and size limits, cost")
+print(f"Shape checks passed: {len(CASES)} whiteboard cases, broken strokes rejoined, "
+      "gap judged against shape size, solid fills, edge and size limits, cost")

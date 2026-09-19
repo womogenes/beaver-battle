@@ -129,6 +129,78 @@ def prop_rect(prop):
     return pygame.FRect(prop.pos.x - prop.size[0] / 2, prop.pos.y - prop.size[1] / 2, *prop.size)
 
 
+def link_strokes(walls, reach=70, min_piece=40, thickness=3):
+    """Rejoin a stroke the camera broke into pieces. Returns the repaired mask.
+
+    A line drawn in one movement arrives in fragments wherever the pen ran dry or the ink
+    went faint, and on the bench a single curve came through in seven pieces with 36 to 65
+    pixel holes between them. A barrier with a hull-sized hole is not a barrier, and a
+    player who drew one continuous line is entitled to one continuous wall, so fragments
+    whose nearest points come within `reach` are joined by the shortest segment between
+    them. A stroke that is already whole gains nothing and is left alone.
+
+    Candidate pairs are found from one distance transform: where two background pixels
+    side by side are closest to different pieces, the sum of their distances is the width
+    of the channel separating those pieces. Only the pairs that pass then pay for an exact
+    search, over contour points rather than every pixel.
+    """
+    ink = walls.astype(np.uint8)
+    count, pieces, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    if count <= 2:
+        return walls
+    distance, nearest = cv2.distanceTransformWithLabels(
+        1 - ink, cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_CCOMP)
+    owner = np.zeros(int(nearest.max()) + 1, np.int32)
+    ys, xs = np.nonzero(ink)
+    owner[nearest[ys, xs]] = pieces[ys, xs]
+    narrowest = np.full(count * count, np.inf, np.float32)
+    for sideways in (True, False):
+        if sideways:
+            left, right = owner[nearest[:, :-1]], owner[nearest[:, 1:]]
+            width = distance[:, :-1] + distance[:, 1:]
+        else:
+            left, right = owner[nearest[:-1]], owner[nearest[1:]]
+            width = distance[:-1] + distance[1:]
+        split = (left != right) & (left > 0) & (right > 0) & (width <= reach)
+        if not split.any():
+            continue
+        low = np.minimum(left[split], right[split]).astype(np.int64)
+        high = np.maximum(left[split], right[split]).astype(np.int64)
+        np.minimum.at(narrowest, low * count + high, width[split])
+    channel = {(int(key // count), int(key % count)): float(narrowest[key])
+               for key in np.nonzero(np.isfinite(narrowest))[0]}
+    if not channel:
+        return walls
+    wanted = set(index for pair in channel for index in pair
+                 if stats[index, cv2.CC_STAT_AREA] >= min_piece)
+    outlines = {}
+    found, _ = cv2.findContours(ink, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
+    for contour in found:
+        points = contour.reshape(-1, 2)
+        piece = int(pieces[points[0][1], points[0][0]])
+        if piece in wanted:
+            outlines.setdefault(piece, []).append(points)
+    # Every boundary pixel of a long thin stroke is thousands of points; a sparse walk
+    # round it finds the same crossing place for a fraction of the pairwise work.
+    edges = {}
+    for piece, parts in outlines.items():
+        points = np.vstack(parts)
+        stride = max(1, len(points) // 300)
+        edges[piece] = points[::stride]
+    bridged = ink.copy()
+    for (first, second) in sorted(channel, key=channel.get):
+        if first not in edges or second not in edges:
+            continue
+        here, there = edges[first], edges[second]
+        spans = np.linalg.norm(here[:, None, :] - there[None, :, :], axis=2)
+        index = int(np.argmin(spans))
+        if spans.flat[index] > reach:
+            continue
+        cv2.line(bridged, tuple(here[index // spans.shape[1]]),
+                 tuple(there[index % spans.shape[1]]), 1, thickness)
+    return bridged.astype(bool)
+
+
 def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
     """Find regions enclosed by ink. Returns (ink plus interiors, shapes).
 
@@ -317,8 +389,14 @@ class Game:
             raise ValueError("Walls must be a bool array matching game height and width")
         self.wall_source = walls
         shapes = []
+        ink = walls
         if walls is not None:
-            walls, shapes = closed_shapes(walls, round(self.setting("shape_gap", 5) * self.scale),
+            # A line drawn in one movement must hold as one barrier, whatever the camera
+            # made of it, so repair the stroke before anything else reads the geometry.
+            ink = link_strokes(walls, round(self.setting("stroke_link", 70) * self.scale),
+                               round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
+                               max(1, round(self.setting("stroke_width", 3) * self.scale)))
+            walls, shapes = closed_shapes(ink, round(self.setting("shape_gap", 5) * self.scale),
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,
                                           self.setting("shape_closure", .45))
@@ -333,7 +411,7 @@ class Game:
                     break
         self.shapes = shapes
         self.shape_art = None
-        self.sticks, self.loose_ink = self.find_sticks(self.wall_source, shapes)
+        self.sticks, self.loose_ink = self.find_sticks(ink, shapes)
         self.walls = walls
         self.wall_distance = cv2.distanceTransform((~walls).astype(np.uint8), cv2.DIST_L2, 5) if walls is not None else None
         self.wall_masks.clear()

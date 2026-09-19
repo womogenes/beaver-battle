@@ -61,7 +61,13 @@ New physical ink displaces overlapping players, pickups, and projected props to 
 
 ### Closed outlines become logs and rocks
 
-Every new wall mask is searched for regions enclosed by ink (`closed_shapes` in `game.py`). Each enclosure is added to the solid mask, so outline plus interior collide exactly like ink, and the interior is projected with a bright texture: a long enclosure (minimum-area rectangle at least 2:1) is a log with grain along its long axis, anything rounder is a rock. `Game.walls` is ink plus interiors; `Game.shapes` lists the current enclosures.
+Every new mask is first repaired, then searched for enclosures.
+
+`link_strokes` rejoins a stroke the camera broke into pieces. A line drawn in one movement arrives in fragments wherever the pen ran dry or the ink went faint; on the bench one curve came through in seven pieces with 36 to 65 pixel holes between them, and a canoe is 36 pixels across, so it sailed straight through. A player who drew one continuous line is entitled to one continuous wall, so fragments whose nearest points come within `game.stroke_link` are joined by the shortest segment between them. A stroke that is already whole gains nothing. Candidate pairs come from one distance transform: where two background pixels side by side are nearest to different pieces, the sum of their distances is the width of the channel between those pieces, and only the pairs that pass pay for an exact search. Drawings further apart than the reach are never joined, and fragments below `game.stroke_min_piece` are specks rather than strokes.
+
+This repairs holes in a barrier. It does not close a barrier that was never closed: an open curve still leaves open water past each of its ends, and a canoe is entitled to sail round it. To divide the board, draw to the board's edge.
+
+Then regions enclosed by ink are found (`closed_shapes` in `game.py`). Each enclosure is added to the solid mask, so outline plus interior collide exactly like ink, and the interior is projected with a bright texture: a long enclosure (minimum-area rectangle at least 2:1) is a log with grain along its long axis, anything rounder is a rock. `Game.walls` is ink plus interiors; `Game.shapes` lists the current enclosures.
 
 - A hand-drawn outline almost never closes, and the camera breaks it further wherever the pen ran dry, so requiring a watertight loop filled very little of a real board. Ink is grown outward at increasing radii and an enclosure is taken at the first radius that reveals it, provided the bridged gap is at most `game.shape_closure` of the enclosure's linear extent (default 0.20).
 - That ratio is the whole judgement, and it is what separates a circle with a pen lift from a letter C. Both are rings with a gap; only one has a gap small beside what it surrounds. An absolute pixel tolerance cannot make that call, since a large shape can be missing far more ink than a small one and still plainly be a container.
