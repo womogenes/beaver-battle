@@ -1,5 +1,10 @@
 #include "controller.h"
 
+bool laser_bench_level(bool steady, bool pulse, uint64_t elapsed_ms)
+{
+    return pulse ? elapsed_ms % 500 < 250 : steady;
+}
+
 bool serial_newer(uint32_t candidate, uint32_t previous)
 {
     uint32_t distance = candidate - previous;

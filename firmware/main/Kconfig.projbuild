@@ -31,8 +31,19 @@ config BB_LASER_BUTTON_TEST
     bool "Laser button bench test (no Wi-Fi, servo disabled)"
     default n
     help
-        Hold either button to turn the GPIO25 laser output on; release both to
-        turn it off. Disable this option and rebuild to restore game operation.
+        Hold FIRE for steady laser output, SPECIAL for 2 Hz flashing (250 ms
+        on, 250 ms off). SPECIAL wins if both are held. Release both for off.
+        Disable this option and rebuild to restore game operation.
+
+config BB_FIRE_GPIO
+    int "FIRE / steady laser button GPIO"
+    range 0 33
+    default 27
+
+config BB_SPECIAL_GPIO
+    int "SPECIAL / pulsing laser button GPIO"
+    range 0 33
+    default 32
 
 config BB_SERVO_ENABLED
     bool "Enable calibrated servo output"

@@ -82,9 +82,14 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 For a standalone laser wiring test, enable **Beaver controller → Laser button
 bench test** (`CONFIG_BB_LASER_BUTTON_TEST=y`) and rebuild/flash. In this mode,
-holding either FIRE (GPIO27) or SPECIAL (GPIO32) turns the GPIO25 laser output
-on; releasing both turns it off after the normal 15 ms debounce. Holding both
-and releasing only one keeps the laser on. The servo is always disabled, and
+holding FIRE gives steady laser output; holding SPECIAL gives a 2 Hz pulse
+(250 ms on / 250 ms off), starting with ON. SPECIAL takes priority if both are
+held. Releasing both turns the laser off after the normal 15 ms debounce.
+The current rewired bench board uses `CONFIG_BB_FIRE_GPIO=14` (D14 steady)
+and `CONFIG_BB_SPECIAL_GPIO=27` (D27 pulse), with the laser gate still D25.
+Both buttons connect their GPIO to GND. Set these options in the ignored local
+sdkconfig; shared defaults remain GPIO27/GPIO32 for earlier controllers.
+The servo is always disabled, and
 the test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
 TEST** and logs `LASER GPIO25 ON` / `LASER GPIO25 OFF` transitions alongside
 button events. Disable this option and rebuild/flash to restore normal game

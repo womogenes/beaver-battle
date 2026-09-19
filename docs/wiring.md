@@ -1,6 +1,6 @@
 # Controller wiring
 
-Use the GPIO labels printed on the classic ESP32 DevKit V1, not physical header positions. All three controllers share this wiring; assign distinct firmware IDs.
+Use the GPIO labels printed on the classic ESP32 DevKit V1, not physical header positions. Assign distinct firmware IDs for game controllers. **Current rewired bench board:** steady laser button D14/GPIO14 to GND, pulsing button D27/GPIO27 to GND, laser gate D25/GPIO25. Set `CONFIG_BB_FIRE_GPIO=14` and `CONFIG_BB_SPECIAL_GPIO=27`. The diagram below shows the earlier GPIO27/GPIO32 button layout; use this override for the current board.
 
 ![Controller wiring with 9V converter and IRLZ44N](controller-wiring.svg)
 

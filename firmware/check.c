@@ -5,6 +5,14 @@
 
 int main(void)
 {
+    assert(!laser_bench_level(false, false, 0));
+    assert(laser_bench_level(true, false, 250));
+    assert(laser_bench_level(false, true, 0));
+    assert(laser_bench_level(false, true, 249));
+    assert(!laser_bench_level(false, true, 250));
+    assert(!laser_bench_level(true, true, 499));
+    assert(laser_bench_level(false, true, 500));
+    assert(!laser_bench_level(false, false, 500));
     Button button = {0};
     assert(!button_update(&button, true, 0));
     assert(!button_update(&button, false, 3));

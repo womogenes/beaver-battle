@@ -25,7 +25,8 @@
 
 #include "controller.h"
 
-enum { LASER_GPIO = 25, SERVO_GPIO = 26, FIRE_GPIO = 27, SPECIAL_GPIO = 32,
+enum { LASER_GPIO = 25, SERVO_GPIO = 26, FIRE_GPIO = CONFIG_BB_FIRE_GPIO,
+       SPECIAL_GPIO = CONFIG_BB_SPECIAL_GPIO,
        WIFI_READY = BIT0, HEARTBEAT_MS = 20, LOOP_MS = 5, PACKET_CAPACITY = 512 };
 
 static const char *log_tag = "beaver";
@@ -143,12 +144,19 @@ static void laser_button_test(void)
     Button fire = {0};
     Button special = {0};
     bool laser = false;
+    bool previous_pulse = false;
+    uint64_t pulse_started = 0;
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "LASER BUTTON TEST: hold either button for ON; release both for OFF; servo disabled; no Wi-Fi");
+    ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; servo disabled; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
     ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
     while (true) {
-        buttons_read(&fire, &special, time_ms());
-        bool requested = fire.pressed || special.pressed;
+        uint64_t now = time_ms();
+        buttons_read(&fire, &special, now);
+        if (special.pressed && !previous_pulse) {
+            pulse_started = now;
+        }
+        previous_pulse = special.pressed;
+        bool requested = laser_bench_level(fire.pressed, special.pressed, now - pulse_started);
         if (requested != laser) {
             output_update(requested, false);
             laser = requested;
@@ -167,7 +175,7 @@ static void servo_button_test(void)
     uint32_t pulse_us = 1500;
     uint64_t next_step_ms = time_ms() + 20;
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "SERVO BUTTON TEST: GPIO27 lowers pulse; GPIO32 raises; neither/both holds; laser off; no Wi-Fi");
+    ESP_LOGI(log_tag, "SERVO BUTTON TEST: GPIO%d lowers pulse; GPIO%d raises; neither/both holds; laser off; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
     ESP_LOGI(log_tag, "SERVO GPIO%d 1500 us; limits %d..%d us; step %d us / 20 ms", SERVO_GPIO,
              CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
     while (true) {
