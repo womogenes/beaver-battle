@@ -24,7 +24,25 @@ Wall detection warps the camera image and then looks for ink, meaning pixels dar
 
 The local test carries the work because an absolute cutoff cannot survive a projected surface. Measured on the mounted rig, glare moves the bare whiteboard between about 158 and 212 while a black marker stroke photographs near 150 once the lens blurs it against a lit background, so no single cutoff separates ink from board. The local drop at the same stroke reached 184 against a canvas-wide 99.5th percentile of 6. `wall_stroke` must exceed the widest stroke actually drawn, or the middle of a fat line reads as background; 21 logical pixels is roughly 2.5 cm on a 1.5 m board.
 
-The strongest color channel is used, so saturated red ink stays reserved for laser dots and is not read as a wall.
+# What to draw with
+
+Ink is read from the **red channel alone**, and that decides which pens work. A red laser dot *raises* red, so no mark that lowers red can be confused with one. Pens that absorb red are safe; pens that keep red high and lower green and blue instead produce exactly a laser's signature and are deliberately left invisible rather than made ambiguous.
+
+Measured on the mounted rig with five circles drawn side by side, at `wall_contrast = 20`:
+
+| Pen | Red-channel drop | Ink pixels | Result |
+| --- | --- | --- | --- |
+| Green | 76 | 1246 | Fills as a solid body; the best pen on this board |
+| Black | 59 | 721 | Fills as a solid body |
+| Blue | 44 | 649 | Solid as a line, but too broken to fill reliably |
+| Pink | 13 | 23 | Not detected |
+| Orange | −8 | 0 | Not detected |
+
+**Use green or black.** Green reads strongest here because the ink is a dark teal that absorbs red heavily. **Blue works as a barrier line** but its stroke comes through in arcs with gaps far wider than `game.shape_gap` can close, so a blue outline will not fill into a rock; draw blue thickly, or go over it twice, if a filled body is wanted. **Do not use red, orange or pink.** Orange is the clearest case: it reflects *more* red than the whiteboard does, so its red-channel drop is negative and no threshold can ever find it. These are not tuning failures and lowering `wall_contrast` will not fix them; the colors are physically the same signal as the dot the players aim with.
+
+Moving from the strongest channel to red took green from 413 to 973 pixels and blue from 53 to 255 at the old threshold, while *lowering* board noise from 29 to 11.
+
+Because ink is read from red, cyan and blue *projected artwork* is low in red for the same reason blue ink is. `under_white` removes it: knowing the frame being projected and the projector's measured strength, the worker adds back the light the projector withheld and reads ink from the board as it would look under a flat white field. Artwork therefore places no constraint on the palette when the canvas is handed over. Without the handover the worker reads the raw view, and strongly cyan or blue art can register as ink.
 
 `camera.wall_persistence` consecutive observations add a wall; the same number of contrary observations erase it. `camera.wall_update_hz` bounds update cost, and setting it to 0 keeps the calibration board scan without ever re-reading the board under game art. Published masks are bool arrays of `(display.height, display.width)`, True for solid. Bright frames or transient shadows shorter than the persistence interval do not immediately change walls. Longer shadows and hands can become temporary obstacles.
 

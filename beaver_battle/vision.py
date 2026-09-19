@@ -219,9 +219,15 @@ def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WA
     gradient instead: is this pixel darker than the board beside it. The absolute cutoff
     stays as an OR so that genuinely dark regions wider than the kernel still register.
 
-    The strongest channel is used, so saturated red ink stays reserved for laser dots.
+    The red channel alone is read, which decides what a pen may be drawn in. A red laser
+    dot *raises* red, so no ink that lowers red can be mistaken for one: black, green,
+    blue, purple and brown all absorb red and are safe to detect. Ink that instead keeps
+    red high and lowers green and blue -- red, orange, pink, magenta -- produces exactly a
+    laser's signature and is deliberately left invisible rather than made ambiguous.
+    Measured on the bench, moving from the strongest channel to red took green ink from
+    413 to 973 pixels and blue from 53 to 255 while lowering board noise from 29 to 11.
     """
-    gray = warped if warped.ndim == 2 else np.max(warped, axis=2)
+    gray = warped if warped.ndim == 2 else warped[:, :, 2]
     size = max(3, int(stroke) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
     relief = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
@@ -268,6 +274,17 @@ def projector_gain(reference, width, height, ink):
 def expected_board(reference, gain, canvas):
     """What the board should look like given the frame currently being projected onto it."""
     return reference - gain * (1.0 - canvas.astype(np.float32) / 255.0)
+
+
+def under_white(warped, gain, canvas):
+    """Undo the projection, recovering the board as it would look under a flat white field.
+
+    Ink is read from the red channel, and cyan or blue artwork is low in red for exactly
+    the same reason blue ink is. Adding back the light the projector withheld removes the
+    artwork and leaves physical marks, wherever they were drawn and whenever.
+    """
+    restored = warped.astype(np.float32) + gain * (1.0 - canvas.astype(np.float32) / 255.0)
+    return np.clip(restored, 0, 255).astype(np.uint8)
 
 
 def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
@@ -699,9 +716,11 @@ class Vision:
         # A zero rate keeps the calibration board scan and stops re-reading under game art.
         if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:
             warped = cv2.warpPerspective(frame, self.matrix, (width, height), borderValue=(255, 255, 255))
-            dark = ink_mask(warped, *self.ink_settings())
             canvas = self.projection_for(timestamp)
-            if canvas is not None and self.board_reference is not None and self.board_gain is not None:
+            predicted = canvas is not None and self.board_reference is not None and self.board_gain is not None
+            surface = under_white(warped, self.board_gain, canvas) if predicted else warped
+            dark = ink_mask(surface, *self.ink_settings())
+            if predicted:
                 dark = dark | obstacles(warped, self.board_reference, self.board_gain,
                                         canvas, *self.obstacle_settings())
             with self.lock:

@@ -106,6 +106,35 @@ def check_ink():
     assert not ink_mask(red).any(), "Saturated red stays reserved for laser dots"
 
 
+def check_ink_colours():
+    """What a pen may be drawn in is decided by the laser, not by how dark the ink looks."""
+    width, height = 1280, 720
+    board = np.full((height, width, 3), 200, np.uint8)
+    # Measured bench strokes, as BGR, against a board near 205.
+    pens = {"black": (155, 150, 141), "green": (164, 166, 117), "blue": (191, 182, 154),
+            "pink": (195, 167, 197), "orange": (170, 180, 194)}
+    spots = {}
+    for index, (name, colour) in enumerate(pens.items()):
+        x = 150 + index * 220
+        cv2.circle(board, (x, 300), 60, colour, 4)
+        spots[name] = (x, 300)
+    mask = ink_mask(board, 75, 20, 21)
+
+    def found(name):
+        x, y = spots[name]
+        return int(mask[y - 70:y + 70, x - 70:x + 70].sum())
+
+    for name in ("black", "green", "blue"):
+        assert found(name) > 300, f"{name} ink absorbs red and must be detected, got {found(name)}"
+    for name in ("pink", "orange"):
+        assert found(name) < 60, f"{name} ink carries a laser's signature and must stay invisible"
+
+    # The dot the players aim with raises red; it can never be read as ink.
+    laser = np.full((height, width, 3), 200, np.uint8)
+    cv2.circle(laser, (640, 360), 5, (0, 0, 255), -1)
+    assert not ink_mask(laser, 75, 20, 21).any(), "A red laser dot must never become a wall"
+
+
 def check_scan():
     """Calibration reads the board against the marker screen, whose markers are dark by design."""
     width, height = 1280, 720
@@ -295,9 +324,14 @@ def check_pipeline():
         cv2.circle(frame, (280, 100), 3, (0, 0, 255), -1)
         identified = vision.process_frame(frame, 1.7, 1, 1.65)
         assert np.linalg.norm(np.asarray(identified.aims[1]) - (280, 100)) < 2
+        # Ink is read from red, so blue artwork is only separable from blue ink once the
+        # worker is told what it projected. Hand over the frame that produced this view.
+        canvas = np.full((height, width, 3), 255, np.uint8)
+        canvas[50:100, 100:200] = (20, 80, 255)
+        vision.set_projection(canvas, 1.85)
         second = vision.process_frame(frame, 1.85)
         assert second.walls[180, 357], "Physical dark line becomes wall"
-        assert not second.walls[70, 150], "Bright saturated blue art must not become wall"
+        assert not second.walls[70, 150], "Projected art is undone before ink is read"
         assert not second.preview.flags.writeable and not second.walls.flags.writeable
         try:
             second.aims[1] = (0, 0)
@@ -470,6 +504,7 @@ def check_worker():
 
 check_calibration()
 check_ink()
+check_ink_colours()
 check_scan()
 check_obstacles()
 check_projection_handover()
@@ -481,5 +516,5 @@ check_walls()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, drawn ink and board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, drawn ink by pen colour, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")
