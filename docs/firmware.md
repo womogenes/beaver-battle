@@ -80,6 +80,17 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ## Runtime behavior
 
+For a standalone laser wiring test, enable **Beaver controller → Laser button
+bench test** (`CONFIG_BB_LASER_BUTTON_TEST=y`) and rebuild/flash. In this mode,
+holding either FIRE (GPIO27) or SPECIAL (GPIO32) turns the GPIO25 laser output
+on; releasing both turns it off after the normal 15 ms debounce. Holding both
+and releasing only one keeps the laser on. The servo is always disabled, and
+the test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
+TEST** and logs `LASER GPIO25 ON` / `LASER GPIO25 OFF` transitions alongside
+button events. Disable this option and rebuild/flash to restore normal game
+operation and its laptop-controlled laser lease. The option defaults off in
+the shared project; a board's ignored local sdkconfig can enable it for testing.
+
 The serial monitor at 115200 baud reports every debounced button transition,
 including when Wi-Fi is unconfigured or disconnected. For example:
 
@@ -91,8 +102,9 @@ I (2678) beaver: SPECIAL GPIO32 RELEASED
 ```
 
 The timestamp is milliseconds since boot. Holding a button produces one press
-line; releasing it produces one release line. With no laptop connection the
-laser remains off, and the servo remains disabled with the default settings.
+line; releasing it produces one release line. In normal game mode, with no
+laptop connection the laser remains off, and the servo remains disabled with
+the default settings.
 
 The exact wire format is in [PROTOCOL.md](../PROTOCOL.md). The controller sends
 button state every 20 ms and immediately after debounced changes. It also sends

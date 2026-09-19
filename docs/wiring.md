@@ -44,4 +44,6 @@ The available IRLZ44N is a switch, not a voltage or current regulator. Its speci
 
 ## Button monitor
 
-Flash the controller build, then open a 115200-baud serial monitor. Each press/release reports `FIRE GPIO27 PRESSED/RELEASED` or `SPECIAL GPIO32 PRESSED/RELEASED`. This works with empty Wi-Fi credentials. The laser stays off without host commands, and servo output is disabled by default. Close the monitor before the next firmware upload.
+Flash the controller build, then open a 115200-baud serial monitor. Each press/release reports `FIRE GPIO27 PRESSED/RELEASED` or `SPECIAL GPIO32 PRESSED/RELEASED`. This works with empty Wi-Fi credentials. In the normal game build, the laser stays off without host commands, and servo output is disabled by default. Close the monitor before the next firmware upload.
+
+For the standalone laser test, enable `CONFIG_BB_LASER_BUTTON_TEST` as described in [firmware instructions](firmware.md). Holding either button turns GPIO25 on; releasing both turns it off after debounce. This mode does not use Wi-Fi or the game and always disables the servo. Disable the test option and reflash before returning to the game.

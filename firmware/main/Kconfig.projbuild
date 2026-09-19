@@ -27,8 +27,16 @@ config BB_LASER_DUTY
     range 1 1023
     default 1023
 
+config BB_LASER_BUTTON_TEST
+    bool "Laser button bench test (no Wi-Fi, servo disabled)"
+    default n
+    help
+        Hold either button to turn the GPIO25 laser output on; release both to
+        turn it off. Disable this option and rebuild to restore game operation.
+
 config BB_SERVO_ENABLED
     bool "Enable calibrated servo output"
+    depends on !BB_LASER_BUTTON_TEST
     default n
     help
         Leave disabled until rest/press pulse widths and mechanical travel are

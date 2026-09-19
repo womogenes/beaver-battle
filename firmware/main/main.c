@@ -38,7 +38,7 @@ static uint64_t time_ms(void)
 
 static bool servo_enabled(void)
 {
-#ifdef CONFIG_BB_SERVO_ENABLED
+#if defined(CONFIG_BB_SERVO_ENABLED) && !defined(CONFIG_BB_LASER_BUTTON_TEST)
     return true;
 #else
     return false;
@@ -114,6 +114,41 @@ static void output_update(bool laser, bool pressing)
         previous_pressing = pressing;
     }
 }
+
+static bool buttons_read(Button *fire, Button *special, uint64_t now)
+{
+    bool fire_changed = button_update(fire, gpio_get_level(FIRE_GPIO) == 0, now);
+    bool special_changed = button_update(special, gpio_get_level(SPECIAL_GPIO) == 0, now);
+    if (fire_changed) {
+        ESP_LOGI(log_tag, "FIRE GPIO%d %s", FIRE_GPIO, fire->pressed ? "PRESSED" : "RELEASED");
+    }
+    if (special_changed) {
+        ESP_LOGI(log_tag, "SPECIAL GPIO%d %s", SPECIAL_GPIO, special->pressed ? "PRESSED" : "RELEASED");
+    }
+    return fire_changed || special_changed;
+}
+
+#ifdef CONFIG_BB_LASER_BUTTON_TEST
+static void laser_button_test(void)
+{
+    Button fire = {0};
+    Button special = {0};
+    bool laser = false;
+    TickType_t wake_tick = xTaskGetTickCount();
+    ESP_LOGI(log_tag, "LASER BUTTON TEST: hold either button for ON; release both for OFF; servo disabled; no Wi-Fi");
+    ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
+    while (true) {
+        buttons_read(&fire, &special, time_ms());
+        bool requested = fire.pressed || special.pressed;
+        if (requested != laser) {
+            output_update(requested, false);
+            laser = requested;
+            ESP_LOGI(log_tag, "LASER GPIO%d %s", LASER_GPIO, laser ? "ON" : "OFF");
+        }
+        vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
+    }
+}
+#endif
 
 static void wifi_event(void *argument, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -219,6 +254,9 @@ void app_main(void)
     ESP_LOGI(log_tag, "Controller %d: laser off; servo %s", CONFIG_BB_CONTROLLER_ID,
              servo_enabled() ? "enabled at configured rest" : "disabled");
     ESP_LOGI(log_tag, "Buttons: FIRE GPIO%d, SPECIAL GPIO%d; switches connect to GND", FIRE_GPIO, SPECIAL_GPIO);
+#ifdef CONFIG_BB_LASER_BUTTON_TEST
+    laser_button_test();
+#endif
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -245,15 +283,7 @@ void app_main(void)
     TickType_t wake_tick = xTaskGetTickCount();
     while (true) {
         uint64_t now = time_ms();
-        bool fire_changed = button_update(&fire, gpio_get_level(FIRE_GPIO) == 0, now);
-        bool special_changed = button_update(&special, gpio_get_level(SPECIAL_GPIO) == 0, now);
-        if (fire_changed) {
-            ESP_LOGI(log_tag, "FIRE GPIO%d %s", FIRE_GPIO, fire.pressed ? "PRESSED" : "RELEASED");
-        }
-        if (special_changed) {
-            ESP_LOGI(log_tag, "SPECIAL GPIO%d %s", SPECIAL_GPIO, special.pressed ? "PRESSED" : "RELEASED");
-        }
-        bool changed = fire_changed || special_changed;
+        bool changed = buttons_read(&fire, &special, now);
         bool wifi_ready = (xEventGroupGetBits(wifi_events) & WIFI_READY) != 0;
         if (!wifi_ready) {
             controller_disconnect(&controller);
