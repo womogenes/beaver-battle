@@ -182,7 +182,10 @@ class Game:
     shore: float = 0.0
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
-    backdrop: pygame.Surface | None = None
+    sticks: list = field(default_factory=list)
+    loose_ink: np.ndarray | None = None
+    show_ink: bool = False
+    pads: list = field(default_factory=list)
 
     def setting(self, name, default):
         return self.config.get("game", {}).get(name, default)
@@ -233,22 +236,11 @@ class Game:
         self.blocked = False
         self.error = ""
         layout = [
-            ("wall", .32, .30, 58, 3, (116, 22)),
-            ("wall", .70, .73, 58, 3, (116, 22)),
-            ("barrier", .50, .53, 48, 3, (22, 96)),
-            ("barrier", .40, .12, 45, 3, (90, 20)),
-            ("barrier", .42, .66, 45, 3, (90, 20)),
-            ("barrier", .86, .72, 40, 3, (20, 80)),
-            ("barrier", .15, .45, 40, 3, (20, 80)),
             ("asteroid", .28, .68, 22, 2, None),
             ("asteroid", .72, .28, 22, 2, None),
-            ("lilypad", .23, .43, 16, 1, None),
-            ("lilypad", .77, .57, 16, 1, None),
-            ("lilypad", .50, .26, 16, 1, None),
-            ("lilypad", .12, .66, 16, 1, None),
-            ("lilypad", .88, .40, 16, 1, None),
-            ("lilypad", .62, .86, 16, 1, None),
         ]
+        self.pads = [pygame.Vector2(x * self.width, y * self.height) for x, y in
+                     ((.23, .43), (.77, .57), (.50, .26), (.12, .66), (.88, .40), (.62, .86), (.36, .14), (.90, .84))]
         if self.setting("hazards", False):
             layout += [
                 ("turret", .11, .65, 21, 3, None),
@@ -296,10 +288,34 @@ class Game:
                     break
         self.shapes = shapes
         self.shape_art = None
+        self.sticks, self.loose_ink = self.find_sticks(self.wall_source, shapes)
         self.walls = walls
         self.wall_distance = cv2.distanceTransform((~walls).astype(np.uint8), cv2.DIST_L2, 5) if walls is not None else None
         self.wall_masks.clear()
         return True
+
+    def find_sticks(self, ink, shapes):
+        """Open strokes of ink: long thin ones render as sticks, anything else is left as plain ink."""
+        if ink is None:
+            return [], None
+        count, labels, stats, centers = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
+        outlines = set()
+        for shape in shapes:
+            points = shape.contour.reshape(-1, 2)
+            outlines.update(int(label) for label in labels[points[:, 1], points[:, 0]] if label)
+        sticks, loose = [], np.zeros(ink.shape, bool)
+        for label in range(1, count):
+            if label in outlines or stats[label][4] < 40 * self.scale ** 2:
+                continue
+            ys, xs = np.nonzero(labels == label)
+            center, (across, along), degrees = cv2.minAreaRect(np.column_stack([xs, ys]).astype(np.float32))
+            if across > along:
+                across, along, degrees = along, across, degrees - 90
+            if across <= 18 * self.scale and along >= 3 * max(across, 1):
+                sticks.append((center, along, max(across, 4 * self.scale), math.radians(degrees + 90)))
+            else:
+                loose |= labels == label
+        return sticks, loose
 
     def wall_mask(self, radius):
         radius = max(0, math.ceil(radius))
@@ -426,7 +442,7 @@ class Game:
             return True
         if isinstance(target, Prop) and target.hp > 0:
             target.hp -= damage
-            if target.hp <= 0 and target.kind in ("barrel", "lilypad", "asteroid"):
+            if target.hp <= 0 and target.kind in ("barrel", "asteroid"):
                 if not self.drop_bag:
                     self.drop_bag = ["laser", "jouster", "mine"]
                     self.rng.shuffle(self.drop_bag)
@@ -684,21 +700,45 @@ class Game:
         surface.blit(image, image.get_rect(center=center))
 
     def shape_image(self, shape):
+        pad = math.ceil(6 * self.scale)
         x, y, width, height = cv2.boundingRect(shape.contour)
-        mask = np.zeros((height, width), np.uint8)
-        cv2.drawContours(mask, [shape.contour], -1, 255, -1, offset=(-x, -y))
-        return sprites.outline_fill(shape.kind, cv2.GaussianBlur(mask, (3, 3), 0), (x, y), shape.angle, self.scale), (x, y)
+        mask = np.zeros((height + 2 * pad, width + 2 * pad), np.uint8)
+        cv2.drawContours(mask, [shape.contour], -1, 255, -1, offset=(pad - x, pad - y))
+        smooth = cv2.approxPolyDP(shape.contour, 1.5 * self.scale, True)
+        edge = (smooth.reshape(-1, 2) + (pad - x, pad - y)).tolist()
+        return sprites.outline_fill(shape.kind, cv2.GaussianBlur(mask, (3, 3), 0), shape.angle, edge, self.scale), (x - pad, y - pad)
+
+    def stick_image(self, stick):
+        center, along, across, angle = stick
+        seed = round(center[0] / 40) * 97 + round(center[1] / 40)
+        twig = self.sprite(("stick", round(along / 6), round(across / 2), seed),
+                           lambda: sprites.stick(round(along / 6) * 6, max(4, round(across / 2) * 2), seed=seed))
+        twig = pygame.transform.rotozoom(twig, -math.degrees(angle), 1)
+        return twig, twig.get_rect(center=center).topleft
+
+    def bob(self, index, topleft):
+        """Floating things rock gently on the water; purely cosmetic."""
+        return (topleft[0] + 1.6 * self.scale * math.sin(self.time * 1.9 + index * 2.1),
+                topleft[1] + 1.6 * self.scale * math.cos(self.time * 1.4 + index * 1.3))
 
     def draw(self, surface):
         surface.fill(WATER)
         if not self.players:
             return
         unit = self.scale
+        for index, pad in enumerate(self.pads):
+            image = self.sprite(("pad", index), lambda: sprites.lily_pad(16 * unit, degrees=index * 67, flower=index % 3 != 2))
+            surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))
         if self.shape_art is None:
-            self.shape_art = [self.shape_image(shape) for shape in self.shapes]
-        surface.blits(self.shape_art)
-        if self.backdrop is not None:
-            surface.blit(self.backdrop, (0, 0))
+            self.shape_art = [self.shape_image(shape) for shape in self.shapes] + [self.stick_image(stick) for stick in self.sticks]
+            if self.show_ink and self.loose_ink is not None and self.loose_ink.any():
+                ink = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+                pixels, opacity = pygame.surfarray.pixels3d(ink), pygame.surfarray.pixels_alpha(ink)
+                pixels[self.loose_ink.T] = sprites.BARK_LINE
+                opacity[self.loose_ink.T] = 255
+                del pixels, opacity
+                self.shape_art.append((ink, (0, 0)))
+        surface.blits([(image, self.bob(index, topleft)) for index, (image, topleft) in enumerate(self.shape_art)])
         for index, prop in enumerate(self.props):
             if prop.hp <= 0:
                 continue
@@ -707,9 +747,6 @@ class Game:
                 self.stamp(surface, self.sprite(("log", index), lambda: sprites.log(prop.size[0] / unit, prop.size[1] / unit, unit, seed=index)), pos)
             elif prop.kind == "asteroid":
                 self.stamp(surface, self.sprite(("boulder", index), lambda: sprites.boulder(radius, index)), pos)
-            elif prop.kind == "lilypad":
-                self.stamp(surface, self.sprite(("lilypad", index), lambda: sprites.lily_pad(radius, degrees=index * 67)), pos)
-                continue
             elif prop.kind == "barrel":
                 self.stamp(surface, self.sprite(("barrel",), lambda: sprites.barrel(radius, self.font)), pos)
             else:

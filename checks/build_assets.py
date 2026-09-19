@@ -51,7 +51,6 @@ def lily_pad():
 
 def textures():
     cv2.imwrite(str(ROOT / "bark.png"), lift(cv2.imread(str(ROOT / "source/bark.webp")), 62))
-    cv2.imwrite(str(ROOT / "cobble.png"), lift(cv2.imread(str(ROOT / "source/cobble.webp")), 45))
 
 
 if __name__ == "__main__":

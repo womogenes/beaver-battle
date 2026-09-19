@@ -62,7 +62,7 @@ def sheet(path):
         ("Canoe + Tim (P3)", crewed(sprites.canoe(18, purple, zoom * .82), head, (240, 200))),
         ("Ejected Tim (swim ring)", crewed(sprites.swimmer(10, blue, zoom * 1.3), sprites.tim(14.5, zoom * 1.3, paws=False), (240, 200))),
         ("Jouster power-up active", jouster),
-        ("Lily pad (shoot for power-up)", sprites.lily_pad(16, zoom)),
+        ("Lily pad (decoration)", sprites.lily_pad(16, zoom)),
         ("Drifting boulder", sprites.boulder(22, 1, zoom)),
         ("Thrown rock", sprites.pebble(5, 3, zoom * 3)),
         ("Log", sprites.log(116, 22, zoom * .62)),

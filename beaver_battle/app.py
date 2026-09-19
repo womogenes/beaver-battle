@@ -118,25 +118,7 @@ def main():
     mode = 'game' if args.simulate else ('calibration' if args.calibrate else 'lobby')
     ids = list(range(1, config['game']['players'] + 1))
     walls = simulated_walls(width, height) if args.simulate else None
-    wall_overlay = None
-    if args.simulate:
-        import cv2
-        from beaver_battle import sprites
-        wall_overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        count, labels, stats, centers = cv2.connectedComponentsWithStats(walls.astype(np.uint8))
-        for label in range(1, count):
-            x, y, w, h, area = stats[label]
-            if area > .9 * w * h and min(w, h) <= 12:
-                twig = sprites.stick(w, h, seed=label)
-                wall_overlay.blit(twig, twig.get_rect(center=(x + w / 2, y + h / 2)))
-            else:
-                # A drawn outline rather than a straight stroke: show the ink itself, in bark brown.
-                pixels = pygame.surfarray.pixels3d(wall_overlay)
-                opacity = pygame.surfarray.pixels_alpha(wall_overlay)
-                pixels[(labels == label).T] = sprites.BARK_LINE
-                opacity[(labels == label).T] = 255
-                del pixels, opacity
-        game.backdrop = wall_overlay
+    game.show_ink = args.simulate
     snapshot = VisionSnapshot()
     elapsed = 0.0
     frame_count = 0

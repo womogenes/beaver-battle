@@ -431,13 +431,13 @@ def tiled(name, side, turn=0):
     return art_cache[key]
 
 
-def outline_fill(kind, mask, origin, angle, zoom=1):
-    """Fill a closed marker outline: bark with the grain along a log, cobble for a rock.
+def outline_fill(kind, mask, angle, edge, zoom=1):
+    """Fill a closed marker outline and trace its edge: bark with the grain along a log, the rock art for a rock.
 
-    mask is the shape's uint8 alpha inside its bounding box and origin the box's board position.
-    Cobble is anchored to the board so a rock's pattern holds still while its outline is redrawn.
+    mask is the shape's uint8 alpha inside its padded bounding box; edge is its outline in the same coordinates.
     """
     height, width = mask.shape
+    image = pygame.Surface((width, height), pygame.SRCALPHA)
     if kind == "log":
         tile = tiled("bark.png", max(8, round(120 * zoom)), 90)
         reach = math.ceil(math.hypot(width, height)) + 2
@@ -446,16 +446,23 @@ def outline_fill(kind, mask, origin, angle, zoom=1):
             for y in range(0, reach, tile.get_height()):
                 grain.blit(tile, (x, y))
         grain = pygame.transform.rotozoom(grain, -math.degrees(angle), 1)
-        image = pygame.Surface((width, height), pygame.SRCALPHA)
         image.blit(grain, grain.get_rect(center=(width / 2, height / 2)))
     else:
-        tile = tiled("cobble.png", max(8, round(190 * zoom)))
-        image = pygame.Surface((width, height), pygame.SRCALPHA)
-        side = tile.get_width()
-        for x in range(-(origin[0] % side), width, side):
-            for y in range(-(origin[1] % side), height, side):
-                image.blit(tile, (x, y))
+        # The single rock, enlarged so its facets span the outline and its own rim falls outside it.
+        image.fill(STONE)
+        rock = art("rock.png")
+        scale = 1.22 * max(width / rock.get_width(), height / rock.get_height())
+        rock = pygame.transform.smoothscale(rock, (round(rock.get_width() * scale), round(rock.get_height() * scale)))
+        image.blit(rock, rock.get_rect(center=(width / 2, height / 2)))
     alpha = pygame.surfarray.pixels_alpha(image)
     alpha[:] = mask.T
     del alpha
+    color = BARK_LINE if kind == "log" else STONE_DARK
+    trace = pygame.Surface((width * SS, height * SS), pygame.SRCALPHA)
+    points = [(x * SS, y * SS) for x, y in edge]
+    line = max(2, round(6 * zoom * SS))
+    pygame.draw.lines(trace, color, True, points, line)
+    for point in points:
+        pygame.draw.circle(trace, color, point, line / 2)
+    image.blit(pygame.transform.smoothscale(trace, (width, height)), (0, 0))
     return image

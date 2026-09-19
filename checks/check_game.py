@@ -39,7 +39,7 @@ def arena(players=(1, 2), moving=False):
 game = Game(config)
 game.new_match([1, 2, 3])
 assert not game.blocked
-assert {prop.kind for prop in game.props} == {"wall", "barrier", "asteroid", "lilypad"}
+assert {prop.kind for prop in game.props} == {"asteroid"}
 
 # Continuous motion, a bounded turn rate, and no aim means retaining heading.
 game = arena((1,), moving=True)
