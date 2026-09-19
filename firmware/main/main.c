@@ -38,7 +38,7 @@ static uint64_t time_ms(void)
 
 static bool servo_enabled(void)
 {
-#if defined(CONFIG_BB_SERVO_ENABLED) && !defined(CONFIG_BB_LASER_BUTTON_TEST)
+#if !defined(CONFIG_BB_LASER_BUTTON_TEST) && (defined(CONFIG_BB_SERVO_ENABLED) || defined(CONFIG_BB_SERVO_BUTTON_TEST))
     return true;
 #else
     return false;
@@ -71,6 +71,10 @@ static void output_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&laser_channel));
     if (servo_enabled()) {
+        uint32_t initial_pulse_us = CONFIG_BB_SERVO_REST_US;
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+        initial_pulse_us = 1500;
+#endif
         ledc_timer_config_t servo_timer = {
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .duty_resolution = LEDC_TIMER_16_BIT,
@@ -84,7 +88,7 @@ static void output_init(void)
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .channel = LEDC_CHANNEL_1,
             .timer_sel = LEDC_TIMER_1,
-            .duty = (uint32_t)((UINT64_C(65536) * CONFIG_BB_SERVO_REST_US) / 20000),
+            .duty = (uint32_t)((UINT64_C(65536) * initial_pulse_us) / 20000),
         };
         ESP_ERROR_CHECK(ledc_channel_config(&servo_channel));
     }
@@ -94,6 +98,13 @@ static void output_init(void)
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&buttons));
+}
+
+static void servo_pulse(uint32_t pulse_us)
+{
+    uint32_t duty = (uint32_t)((UINT64_C(65536) * pulse_us) / 20000);
+    ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty));
+    ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1));
 }
 
 static void output_update(bool laser, bool pressing)
@@ -108,9 +119,7 @@ static void output_update(bool laser, bool pressing)
     }
     if (servo_enabled() && pressing != previous_pressing) {
         uint32_t pulse_us = pressing ? CONFIG_BB_SERVO_PRESS_US : CONFIG_BB_SERVO_REST_US;
-        uint32_t duty = (uint32_t)((UINT64_C(65536) * pulse_us) / 20000);
-        ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty));
-        ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1));
+        servo_pulse(pulse_us);
         previous_pressing = pressing;
     }
 }
@@ -144,6 +153,35 @@ static void laser_button_test(void)
             output_update(requested, false);
             laser = requested;
             ESP_LOGI(log_tag, "LASER GPIO%d %s", LASER_GPIO, laser ? "ON" : "OFF");
+        }
+        vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
+    }
+}
+#endif
+
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+static void servo_button_test(void)
+{
+    Button fire = {0};
+    Button special = {0};
+    uint32_t pulse_us = 1500;
+    uint64_t next_step_ms = time_ms() + 20;
+    TickType_t wake_tick = xTaskGetTickCount();
+    ESP_LOGI(log_tag, "SERVO BUTTON TEST: GPIO27 lowers pulse; GPIO32 raises; neither/both holds; laser off; no Wi-Fi");
+    ESP_LOGI(log_tag, "SERVO GPIO%d 1500 us; limits %d..%d us", SERVO_GPIO,
+             CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US);
+    while (true) {
+        uint64_t now = time_ms();
+        buttons_read(&fire, &special, now);
+        if (now >= next_step_ms) {
+            next_step_ms = now + 20;
+            uint32_t requested = servo_jog(pulse_us, fire.pressed, special.pressed,
+                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, 5);
+            if (requested != pulse_us) {
+                pulse_us = requested;
+                servo_pulse(pulse_us);
+                ESP_LOGI(log_tag, "SERVO GPIO%d %" PRIu32 " us", SERVO_GPIO, pulse_us);
+            }
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
     }
@@ -252,10 +290,13 @@ void app_main(void)
 {
     output_init();
     ESP_LOGI(log_tag, "Controller %d: laser off; servo %s", CONFIG_BB_CONTROLLER_ID,
-             servo_enabled() ? "enabled at configured rest" : "disabled");
+             servo_enabled() ? "enabled" : "disabled");
     ESP_LOGI(log_tag, "Buttons: FIRE GPIO%d, SPECIAL GPIO%d; switches connect to GND", FIRE_GPIO, SPECIAL_GPIO);
 #ifdef CONFIG_BB_LASER_BUTTON_TEST
     laser_button_test();
+#endif
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+    servo_button_test();
 #endif
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {

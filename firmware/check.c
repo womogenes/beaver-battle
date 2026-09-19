@@ -88,6 +88,14 @@ int main(void)
     assert(serial_newer(0, UINT32_MAX));
     assert(!serial_newer(UINT32_MAX, 0));
     assert(!serial_newer(2, 2));
-    puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect.");
+    assert(servo_jog(1500, false, false, 1200, 1800, 5) == 1500);
+    assert(servo_jog(1500, true, true, 1200, 1800, 5) == 1500);
+    assert(servo_jog(1500, true, false, 1200, 1800, 5) == 1495);
+    assert(servo_jog(1500, false, true, 1200, 1800, 5) == 1505);
+    assert(servo_jog(1202, true, false, 1200, 1800, 5) == 1200);
+    assert(servo_jog(1798, false, true, 1200, 1800, 5) == 1800);
+    assert(servo_jog(1200, true, false, 1200, 1800, 5) == 1200);
+    assert(servo_jog(1800, false, true, 1200, 1800, 5) == 1800);
+    puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect, servo jogging.");
     return 0;
 }

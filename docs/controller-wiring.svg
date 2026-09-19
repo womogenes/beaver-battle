@@ -107,7 +107,7 @@
 <text x="840" y="817" class="label" style="fill:#cf354a">Converter +5V → servo POWER +</text>
 <text x="840" y="850" class="label">Converter GND → servo GND</text>
 <text x="840" y="890" class="small">Power the servo directly from the converter.</text>
-<text x="840" y="919" class="small">Servo pulses remain disabled until calibrated.</text>
+<text x="840" y="919" class="small">Game mode: enable servo after calibration.</text>
 <text x="35" y="985" class="note">* Verify the board input label. Disconnect external VIN/5V power while the laptop’s USB is powering the board.</text>
 <text x="35" y="1015" class="note">Measure the converter output before connecting. Its 5V current rating and the battery must support the servo’s peak load.</text>
 </svg>

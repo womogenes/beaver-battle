@@ -36,6 +36,8 @@ typedef struct {
 
 bool serial_newer(uint32_t candidate, uint32_t previous);
 bool button_update(Button *button, bool pressed, uint64_t now_ms);
+uint32_t servo_jog(uint32_t pulse_us, bool lower, bool higher,
+                   uint32_t minimum_us, uint32_t maximum_us, uint32_t step_us);
 void controller_tick(Controller *controller, uint64_t now_ms);
 void controller_disconnect(Controller *controller);
 bool controller_command(Controller *controller, const Command *command,

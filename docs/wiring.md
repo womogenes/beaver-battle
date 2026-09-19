@@ -20,7 +20,7 @@ All grounds connect together: battery negative, converter ground, ESP32 GND, MOS
 
 Buttons use internal pull-ups and 15 ms debounce. They do not connect to 5 V. For four-legged switches, use contacts that are open when released and short together when pressed.
 
-The servo's positive power wire goes to its rated supply, not GPIO26 or the laser switch. Firmware leaves servo pulses disabled until its rest/press positions are configured and enabled. Do not connect raw 9 V to GPIO, 3V3, or the shown 5 V rail.
+The servo's positive power wire goes to its rated supply, not GPIO26 or the laser switch. **D26 is GPIO26**, the servo signal pin. Normal game firmware leaves servo pulses disabled until its rest/press positions are configured and enabled; the explicit servo bench test below enables pulses for calibration. Do not connect raw 9 V to GPIO, 3V3, or the shown 5 V rail.
 
 ## Laser current limit
 
@@ -47,3 +47,5 @@ The available IRLZ44N is a switch, not a voltage or current regulator. Its speci
 Flash the controller build, then open a 115200-baud serial monitor. Each press/release reports `FIRE GPIO27 PRESSED/RELEASED` or `SPECIAL GPIO32 PRESSED/RELEASED`. This works with empty Wi-Fi credentials. In the normal game build, the laser stays off without host commands, and servo output is disabled by default. Close the monitor before the next firmware upload.
 
 For the standalone laser test, enable `CONFIG_BB_LASER_BUTTON_TEST` as described in [firmware instructions](firmware.md). Holding either button turns GPIO25 on; releasing both turns it off after debounce. This mode does not use Wi-Fi or the game and always disables the servo. Disable the test option and reflash before returning to the game.
+
+For the standalone positional-servo test, enable `CONFIG_BB_SERVO_BUTTON_TEST` and disable the laser test. Holding D27 moves toward a lower pulse width; holding D32 moves toward a higher pulse width. Neither button or both buttons holds the current commanded position. The laser remains off. The initial setup starts at 1500 microseconds, with limited 1200–1800 microsecond travel. These are initial test settings, not calibrated mechanical limits; see [firmware instructions](firmware.md) for adjustment.

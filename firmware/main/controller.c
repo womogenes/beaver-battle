@@ -28,6 +28,23 @@ void controller_disconnect(Controller *controller)
     controller->press_until_ms = 0;
 }
 
+uint32_t servo_jog(uint32_t pulse_us, bool lower, bool higher,
+                   uint32_t minimum_us, uint32_t maximum_us, uint32_t step_us)
+{
+    if (pulse_us < minimum_us) {
+        pulse_us = minimum_us;
+    } else if (pulse_us > maximum_us) {
+        pulse_us = maximum_us;
+    }
+    if (lower == higher) {
+        return pulse_us;
+    }
+    if (lower) {
+        return pulse_us - minimum_us > step_us ? pulse_us - step_us : minimum_us;
+    }
+    return maximum_us - pulse_us > step_us ? pulse_us + step_us : maximum_us;
+}
+
 void controller_tick(Controller *controller, uint64_t now_ms)
 {
     if (controller->leased && now_ms - controller->last_command_ms >= COMMAND_LEASE_MS) {

@@ -36,11 +36,32 @@ config BB_LASER_BUTTON_TEST
 
 config BB_SERVO_ENABLED
     bool "Enable calibrated servo output"
-    depends on !BB_LASER_BUTTON_TEST
+    depends on !BB_LASER_BUTTON_TEST && !BB_SERVO_BUTTON_TEST
     default n
     help
         Leave disabled until rest/press pulse widths and mechanical travel are
         calibrated. When disabled GPIO26 stays low and no servo pulse is sent.
+
+config BB_SERVO_BUTTON_TEST
+    bool "Servo button bench test (no Wi-Fi, laser off)"
+    depends on !BB_LASER_BUTTON_TEST
+    default n
+    help
+        Start at 1500 us. Hold FIRE to lower the pulse or SPECIAL to raise it.
+        Neither or both buttons hold the current position. Disable this option
+        and rebuild to restore game operation.
+
+config BB_SERVO_TEST_MIN_US
+    int "Servo bench minimum pulse (microseconds)"
+    depends on BB_SERVO_BUTTON_TEST
+    range 500 1500
+    default 1200
+
+config BB_SERVO_TEST_MAX_US
+    int "Servo bench maximum pulse (microseconds)"
+    depends on BB_SERVO_BUTTON_TEST
+    range 1500 2500
+    default 1800
 
 config BB_SERVO_REST_US
     int "Servo rest pulse width (microseconds)"

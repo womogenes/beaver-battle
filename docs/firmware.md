@@ -91,6 +91,20 @@ button events. Disable this option and rebuild/flash to restore normal game
 operation and its laptop-controlled laser lease. The option defaults off in
 the shared project; a board's ignored local sdkconfig can enable it for testing.
 
+For a positional-servo direction test, first disable the laser bench option,
+then enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
+rebuild/flash. GPIO26 produces 50 Hz pulses starting at 1500 microseconds. Hold
+FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. Each step
+is 5 microseconds every 20 ms (250 microseconds/second). Releasing both buttons
+or holding both keeps the last commanded position. Default limits are
+1200–1800 microseconds; `BB_SERVO_TEST_MIN_US` and `BB_SERVO_TEST_MAX_US` let you
+adjust the limits during calibration. Actual rotation direction depends on the
+servo and mounting; this mode assumes a positional servo, not a continuous
+rotation servo. The laser stays off and Wi-Fi/UDP do not start. Serial output
+identifies **SERVO BUTTON TEST**, reports button edges and the current pulse
+width. The two bench modes are mutually exclusive and both default off. Disable
+the servo bench option and rebuild/flash to return to normal game operation.
+
 The serial monitor at 115200 baud reports every debounced button transition,
 including when Wi-Fi is unconfigured or disconnected. For example:
 
@@ -166,5 +180,6 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic firmware/check.c firmware/main/contr
 
 The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
-handling, disabled feedback, and sequence wrap. Physical pin timing, radio
+handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
+Physical pin timing, radio
 latency, power, and mechanical return still require the bench checks above.
