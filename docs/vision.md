@@ -1,0 +1,25 @@
+# Camera and calibration
+
+The UVC capture thread requests MJPEG at the configured camera resolution and rate. It continually replaces one pending frame; the processing thread consumes the newest observation without a queue. Preview arrays are immutable BGR camera images. Aims and wall arrays are in logical display coordinates. Camera failures clear valid aims, report an error, and retry once per second; frames older than `camera.stale_seconds` never produce usable aim.
+
+Keep the camera and projector fixed together. Show the calibration screen and include all four black ArUco markers (DICT_4X4_50 IDs 0–3) in the camera view. Their sixteen corners determine a camera-to-display homography. The saved `.npz` includes both camera and display dimensions and is rejected if either changes. Physical movement or projector keystone changes require calibration again even if resolution is unchanged. This is a planar mapping, not 3D object reconstruction.
+
+Black marker detection needs a bright screen with visible white margins. Calibration images are not learned as walls; learning resumes half a second after successful calibration. `calibration.npz` is local machine data, not a repository artifact.
+
+# Physical drawings and projected art
+
+Wall detection warps the camera image, then classifies pixels with **all three color channels below `camera.wall_threshold`** as dark. `camera.wall_persistence` consecutive dark observations add a wall; the same number of bright observations erase it. `camera.wall_update_hz` bounds update cost. Published masks are bool arrays of `(display.height, display.width)`, True for solid. Bright frames or transient shadows shorter than the persistence interval do not immediately change walls. Longer shadows and hands can become temporary obstacles.
+
+Keep projected game art bright: at least one camera color channel must remain above the configured threshold. Avoid dark outlines, dark text, and black projected backgrounds during play. Projected red highlights the size of a laser are indistinguishable from physical red spots, so reserve small saturated red regions for lasers. Use blue, cyan, yellow, white, and sufficiently bright green for art. Actual exposure, wall threshold, and laser area limits require tuning on the mounted camera; software does not adjust exposure, gain, or white balance.
+
+# Same-color laser identities
+
+Detection finds red components in the original camera frame before transforming their centers. It rejects components outside the configured area limits and outside the logical display. The bridge calls `set_identity(player_id, ready_since)` only after commanding that controller's laser on and others off, receiving acknowledgements, and allowing camera settling. Frames received before `ready_since` cannot establish identity. Exactly one red component must be visible to initialize/reacquire that identity. `set_identity(None, ready_since)` resumes ordinary all-on tracking after settling.
+
+Up to three established identities follow short-term motion via unique global assignment. Missing, merged, closely spaced, stale, or ambiguous dots become invalid. They can regain identity only through another acknowledged solo window; separating an overlap never silently guesses player identity. During an identification window, other controllers retain their internal track but publish no aim because their lasers are intentionally off. The game retains heading whenever no confident aim is present.
+
+# Checks
+
+Run `.venv/bin/python -m checks.check_vision` from the repository root. It uses generated frames and temporary calibration files and does not open a camera. It checks perspective marker calibration, calibration dimensions, laser extraction, three-player identity, overlap recovery, wall hysteresis and erasure, bright art, immutable/stale snapshots, latest-frame replacement under load, reconnect, and resource release. Synthetic passes do not establish physical tracking accuracy or projector latency.
+
+Live smoke check on September 19, 2026: the connected Arducam returned 1280×720 BGR frames through this worker, with a most-recent-frame age of 20 ms at the sampled instant. Both threads stopped and the camera was released. Physical marker calibration, simultaneous laser tracking, and wall threshold tuning still require the mounted projection setup. A synthetic 1280×720 benchmark averaged 12.2 ms of processing per frame on the development laptop; this is not an end-to-end latency measurement.

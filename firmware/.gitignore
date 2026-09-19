@@ -1,0 +1,7 @@
+.pio/
+build/
+managed_components/
+dependencies.lock
+sdkconfig*
+!sdkconfig.defaults
+platformio.local.ini

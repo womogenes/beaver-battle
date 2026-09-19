@@ -1,0 +1,47 @@
+menu "Beaver controller"
+
+config BB_CONTROLLER_ID
+    int "Controller ID (unique per controller)"
+    range 1 3
+    default 1
+
+config BB_WIFI_SSID
+    string "Wi-Fi SSID (2.4 GHz)"
+    default ""
+
+config BB_WIFI_PASSWORD
+    string "Wi-Fi password (empty for open network)"
+    default ""
+
+config BB_LAPTOP_IP
+    string "Laptop IPv4 address"
+    default "192.168.1.2"
+
+config BB_LAPTOP_PORT
+    int "Laptop UDP port"
+    range 1 65535
+    default 4210
+
+config BB_LASER_DUTY
+    int "Laser on duty (10-bit, external gate driver required)"
+    range 1 1023
+    default 1023
+
+config BB_SERVO_ENABLED
+    bool "Enable calibrated servo output"
+    default n
+    help
+        Leave disabled until rest/press pulse widths and mechanical travel are
+        calibrated. When disabled GPIO26 stays low and no servo pulse is sent.
+
+config BB_SERVO_REST_US
+    int "Servo rest pulse width (microseconds)"
+    range 500 2500
+    default 1500
+
+config BB_SERVO_PRESS_US
+    int "Servo press pulse width (microseconds)"
+    range 500 2500
+    default 1600
+
+endmenu

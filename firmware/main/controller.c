@@ -1,0 +1,76 @@
+#include "controller.h"
+
+bool serial_newer(uint32_t candidate, uint32_t previous)
+{
+    uint32_t distance = candidate - previous;
+    return distance != 0 && distance < UINT32_C(0x80000000);
+}
+
+bool button_update(Button *button, bool pressed, uint64_t now_ms)
+{
+    if (pressed != button->candidate) {
+        button->candidate = pressed;
+        button->changed_ms = now_ms;
+    }
+    if (button->pressed != button->candidate &&
+        now_ms - button->changed_ms >= BUTTON_DEBOUNCE_MS) {
+        button->pressed = button->candidate;
+        return true;
+    }
+    return false;
+}
+
+void controller_disconnect(Controller *controller)
+{
+    controller->leased = false;
+    controller->laser = false;
+    controller->pressing = false;
+    controller->press_until_ms = 0;
+}
+
+void controller_tick(Controller *controller, uint64_t now_ms)
+{
+    if (controller->leased && now_ms - controller->last_command_ms >= COMMAND_LEASE_MS) {
+        controller_disconnect(controller);
+    }
+    if (controller->pressing && now_ms >= controller->press_until_ms) {
+        controller->pressing = false;
+    }
+}
+
+bool controller_command(Controller *controller, const Command *command,
+                        uint64_t now_ms, bool servo_enabled)
+{
+    controller_tick(controller, now_ms);
+    bool new_session = !controller->have_session || controller->session != command->session;
+    if (!new_session && command->seq != controller->command_seq &&
+        !serial_newer(command->seq, controller->command_seq)) {
+        return false;
+    }
+    bool reconnecting = new_session || !controller->leased;
+    if (new_session) {
+        controller_disconnect(controller);
+        controller->have_session = true;
+        controller->session = command->session;
+        controller->feedback_id = 0;
+    }
+    bool new_feedback = command->feedback_id != 0 &&
+        (controller->feedback_id == 0 || serial_newer(command->feedback_id, controller->feedback_id));
+    if (new_feedback) {
+        // Consume events even while disabled or cooling down: never queue/replay them.
+        controller->feedback_id = command->feedback_id;
+        if (!reconnecting && servo_enabled && !controller->pressing &&
+            now_ms >= controller->cooldown_until_ms && command->duration_ms > 0) {
+            uint32_t duration = command->duration_ms > FEEDBACK_MAX_MS ?
+                FEEDBACK_MAX_MS : command->duration_ms;
+            controller->pressing = true;
+            controller->press_until_ms = now_ms + duration;
+            controller->cooldown_until_ms = controller->press_until_ms + FEEDBACK_COOLDOWN_MS;
+        }
+    }
+    controller->command_seq = command->seq;
+    controller->last_command_ms = now_ms;
+    controller->leased = true;
+    controller->laser = command->laser;
+    return true;
+}
