@@ -298,6 +298,7 @@ class Game:
     shore: float = 0.0
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
+    ink_art: object = None
     sticks: list = field(default_factory=list)
     loose_ink: np.ndarray | None = None
     pads: list = field(default_factory=list)
@@ -410,6 +411,7 @@ class Game:
                     break
         self.shapes = shapes
         self.shape_art = None
+        self.ink_art = None
         self.sticks, self.loose_ink = self.find_sticks(ink, shapes)
         self.walls = walls
         self.wall_distance = cv2.distanceTransform((~walls).astype(np.uint8), cv2.DIST_L2, 5) if walls is not None else None
@@ -417,7 +419,13 @@ class Game:
         return True
 
     def find_sticks(self, ink, shapes):
-        """Open strokes of ink: long thin ones render as sticks, anything else is left as plain ink."""
+        """Pick out long straight strokes for stick art. Every stroke is painted regardless.
+
+        Stick art is decoration laid over the ink, not a substitute for it. A straight bar
+        drawn across a curved fragment leaves the bends unpainted, and a component that is
+        neither straight enough nor large enough used to be painted by nothing at all, so
+        a beaver would stop dead against geometry the player could not see.
+        """
         if ink is None:
             return [], None
         count, labels, stats, centers = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
@@ -425,7 +433,7 @@ class Game:
         for shape in shapes:
             points = shape.contour.reshape(-1, 2)
             outlines.update(int(label) for label in labels[points[:, 1], points[:, 0]] if label)
-        sticks, loose = [], np.zeros(ink.shape, bool)
+        sticks = []
         for label in range(1, count):
             if label in outlines or stats[label][4] < 40 * self.scale ** 2:
                 continue
@@ -435,9 +443,7 @@ class Game:
                 across, along, degrees = along, across, degrees - 90
             if across <= 18 * self.scale and along >= 3 * max(across, 1):
                 sticks.append((center, along, max(across, 4 * self.scale), math.radians(degrees + 90)))
-            else:
-                loose |= labels == label
-        return sticks, loose
+        return sticks, np.array(ink, dtype=bool)
 
     def wall_mask(self, radius):
         radius = max(0, math.ceil(radius))
@@ -853,9 +859,9 @@ class Game:
             surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))
         if self.shape_art is None:
             self.shape_art = [self.shape_image(shape) for shape in self.shapes] + [self.stick_image(stick) for stick in self.sticks]
+            self.ink_art = None
             if self.loose_ink is not None and self.loose_ink.any():
-                # Every open stroke is solid, so every open stroke is drawn. A curve that
-                # blocks a canoe while staying invisible reads as the game ignoring it.
+                # Everything solid is painted, at least as wide as it collides.
                 width = max(1, round(self.setting("ink_width", 5) * self.scale)) | 1
                 shown = cv2.dilate(self.loose_ink.astype(np.uint8),
                                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (width, width))).astype(bool)
@@ -864,7 +870,10 @@ class Game:
                 pixels[shown.T] = sprites.BARK_LINE
                 opacity[shown.T] = 255
                 del pixels, opacity
-                self.shape_art.append((ink, (0, 0)))
+                self.ink_art = ink
+        if self.ink_art is not None:
+            # Never bobbed: ink is where the collision is, and must be drawn there.
+            surface.blit(self.ink_art, (0, 0))
         surface.blits([(image, self.bob(index, topleft)) for index, (image, topleft) in enumerate(self.shape_art)])
         for index, prop in enumerate(self.props):
             if prop.hp <= 0:

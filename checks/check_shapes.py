@@ -4,6 +4,11 @@ Enclosure filling decides whether someone's homework becomes a playable map, so 
 shapes a whiteboard actually carries are checked one by one rather than by eye.
 """
 
+import os
+
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
 import cv2
 import numpy as np
 
@@ -117,6 +122,47 @@ def check_stroke_linking():
     assert int(joined.sum()) - int(speckled.sum()) < 40, "Specks must not be linked in"
 
 
+def check_everything_solid_is_drawn():
+    """Nothing may block a player without being visible, at the place it blocks them.
+
+    A stroke that stops a beaver while painting nothing reads as the game snagging on
+    empty water, which is indistinguishable from a bug to whoever is holding the pointer.
+    """
+    import pygame
+
+    from beaver_battle.game import Game
+
+    board = blank()
+    cv2.circle(board, (300, 250), 80, 1, 3)                     # fills as a body
+    cv2.polylines(board, [np.array([[600, 100], [760, 260], [640, 420], [700, 600]])
+                          .reshape(-1, 1, 2)], False, 1, 3)     # a curve, painted as ink
+    cv2.line(board, (900, 150), (900, 500), 1, 3)               # straight, gets stick art
+    cv2.circle(board, (1050, 600), 3, 1, -1)                    # a speck, too small for art
+    cv2.circle(board, (480, 640), 26, 1, 3)                     # below the arena floor
+
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    try:
+        config = {"game": {"width": WIDTH, "height": HEIGHT, "players": 2,
+                           "shape_min_area": MIN_AREA, "shape_closure": CLOSURE, "seed": 7}}
+        game = Game(config)
+        game.new_match([1, 2], board.astype(bool))
+        game.players[1].pos = pygame.Vector2(60, 60)
+        game.players[2].pos = pygame.Vector2(1220, 60)
+        game.draw(screen)
+        frame = np.transpose(pygame.surfarray.array3d(screen), (1, 0, 2))
+        painted = frame.min(axis=2) < 235
+        reach = cv2.dilate(painted.astype(np.uint8),
+                           cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))).astype(bool)
+        missed = game.walls & ~reach
+        count, _, stats, centres = cv2.connectedComponentsWithStats(missed.astype(np.uint8), 8)
+        worst = sorted(((int(stats[i, 4]), int(centres[i][0]), int(centres[i][1]))
+                        for i in range(1, count)), reverse=True)[:3]
+        assert not missed.any(), f"{int(missed.sum())} solid pixels are painted by nothing: {worst}"
+    finally:
+        pygame.quit()
+
+
 def check_cost():
     from time import perf_counter
     walls = CASES[6][1]().astype(bool)
@@ -130,9 +176,11 @@ def check_cost():
 
 check_cases()
 check_stroke_linking()
+check_everything_solid_is_drawn()
 check_gap_is_judged_against_size()
 check_filled_body_is_solid()
 check_edge_and_size_limits()
 check_cost()
 print(f"Shape checks passed: {len(CASES)} whiteboard cases, broken strokes rejoined, "
-      "gap judged against shape size, solid fills, edge and size limits, cost")
+      "everything solid is drawn, gap judged against shape size, solid fills, "
+      "edge and size limits, cost")
