@@ -340,7 +340,25 @@ def main():
                     mode, selection = 'lobby', 0
             else:
                 accumulator = 0
-            if mode == 'calibration':
+            if mode in ('survey', 'survey_match'):
+                # Show the map settling, so everyone sees the board they will play on.
+                screen.fill((224, 239, 241))
+                if walls is not None and walls.any():
+                    board = pygame.Surface((width, height), pygame.SRCALPHA)
+                    pixels, opacity = pygame.surfarray.pixels3d(board), pygame.surfarray.pixels_alpha(board)
+                    pixels[walls.T] = (92, 74, 62)
+                    opacity[walls.T] = 255
+                    del pixels, opacity
+                    screen.blit(board, (0, 0))
+                text_line('READING THE BOARD', 70, True)
+                share = vision.survey_progress()
+                bar = pygame.Rect(width // 4, height - 130, width // 2, 18)
+                pygame.draw.rect(screen, (150, 165, 190), bar, 2, border_radius=9)
+                filled = bar.inflate(-6, -6)
+                filled.width = max(1, int(filled.width * share))
+                pygame.draw.rect(screen, (92, 74, 62), filled, border_radius=6)
+                text_line('Keep hands off the board', height - 95)
+            elif mode == 'calibration':
                 vision.draw_calibration(screen)
                 # Name the corner that is blocked, on the board, where the operator is standing.
                 text_line(snapshot.error or 'Keep all four markers in view', height // 2 + 60)

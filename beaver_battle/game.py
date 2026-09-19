@@ -174,7 +174,7 @@ def stroke_ends(ink, look=15, min_branch=25):
     return ends
 
 
-def mend_breaks(walls, reach=90, spread=60, thickness=3, look=15, min_branch=25):
+def mend_breaks(walls, reach=90, spread=60, thickness=3, look=15, min_branch=25, record=None):
     """Carry a stroke's free end on to whatever it was heading for. Returns the mended mask.
 
     link_strokes joins separate pieces, which leaves the case that broke the bench board:
@@ -206,11 +206,14 @@ def mend_breaks(walls, reach=90, spread=60, thickness=3, look=15, min_branch=25)
         ray = int(np.argmin(first))
         if first[ray] >= len(steps):
             continue
-        cv2.line(mended, (x, y), (int(xs[ray, first[ray]]), int(ys[ray, first[ray]])), 1, thickness)
+        target = (int(xs[ray, first[ray]]), int(ys[ray, first[ray]]))
+        cv2.line(mended, (x, y), target, 1, thickness)
+        if record is not None:
+            record.append(((x, y), target))
     return mended.astype(bool)
 
 
-def link_strokes(walls, reach=70, min_piece=40, thickness=3):
+def link_strokes(walls, reach=70, min_piece=40, thickness=3, record=None):
     """Rejoin a stroke the camera broke into pieces. Returns the repaired mask.
 
     A line drawn in one movement arrives in fragments wherever the pen ran dry or the ink
@@ -277,8 +280,11 @@ def link_strokes(walls, reach=70, min_piece=40, thickness=3):
         index = int(np.argmin(spans))
         if spans.flat[index] > reach:
             continue
-        cv2.line(bridged, tuple(here[index // spans.shape[1]]),
-                 tuple(there[index % spans.shape[1]]), 1, thickness)
+        start = tuple(int(value) for value in here[index // spans.shape[1]])
+        finish = tuple(int(value) for value in there[index % spans.shape[1]])
+        cv2.line(bridged, start, finish, 1, thickness)
+        if record is not None:
+            record.append((start, finish))
     return bridged.astype(bool)
 
 
@@ -380,6 +386,8 @@ class Game:
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
     ink_art: object = None
+    bridges: dict = field(default_factory=dict)
+    wall_tick: int = 0
     sticks: list = field(default_factory=list)
     loose_ink: np.ndarray | None = None
     pads: list = field(default_factory=list)
@@ -400,6 +408,7 @@ class Game:
         self.scores = dict.fromkeys(ids, 0)
         self.drop_bag = []
         self.wall_source = None
+        self.bridges.clear()
         self.walls = None
         self.wall_distance = None
         self.wall_masks.clear()
@@ -475,12 +484,14 @@ class Game:
             # A line drawn in one movement must hold as one barrier, whatever the camera
             # made of it, so repair the stroke before anything else reads the geometry.
             thickness = max(1, round(self.setting("stroke_width", 3) * self.scale))
+            found = []
             ink = link_strokes(walls, round(self.setting("stroke_link", 40) * self.scale),
                                round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
-                               thickness)
+                               thickness, record=found)
             # Then carry any free end on, which reaches breaks that connectivity cannot see.
             ink = mend_breaks(ink, round(self.setting("stroke_mend", 180) * self.scale),
-                              self.setting("stroke_spread", 60), thickness)
+                              self.setting("stroke_spread", 60), thickness, record=found)
+            ink = self.hold_bridges(ink, found, thickness)
             walls, shapes = closed_shapes(ink, round(self.setting("shape_gap", 5) * self.scale),
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,
@@ -502,6 +513,30 @@ class Game:
         self.wall_distance = cv2.distanceTransform((~walls).astype(np.uint8), cv2.DIST_L2, 5) if walls is not None else None
         self.wall_masks.clear()
         return True
+
+    def hold_bridges(self, ink, found, thickness):
+        """Keep a repair in place for a while after the evidence for it flickers out.
+
+        Whether a free end is visible on any one frame turns on a pixel or two, and a
+        bridge appearing or vanishing takes a whole enclosure with it: measured on a still
+        board, solid area swung by a factor of two and filled bodies came and went between
+        six and ten. The board is not changing, only our reading of it, so a repair is
+        remembered for `game.bridge_memory` wall updates and forgotten only once nothing
+        has proposed it again for that long.
+        """
+        self.wall_tick += 1
+        memory = max(1, int(self.setting("bridge_memory", 25)))
+        for start, finish in found:
+            # Round the ends so the same repair refreshes rather than piling up.
+            key = (start[0] // 8, start[1] // 8, finish[0] // 8, finish[1] // 8)
+            self.bridges[key] = (self.wall_tick, start, finish)
+        held = ink.astype(np.uint8)
+        for key, (seen, start, finish) in list(self.bridges.items()):
+            if self.wall_tick - seen > memory:
+                del self.bridges[key]
+                continue
+            cv2.line(held, start, finish, 1, thickness)
+        return held.astype(bool)
 
     def find_sticks(self, ink, shapes):
         """Pick out long straight strokes for stick art. Every stroke is painted regardless.

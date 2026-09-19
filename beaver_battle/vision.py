@@ -502,6 +502,9 @@ class Vision:
     wall_filter: WallFilter = field(default_factory=WallFilter, init=False)
     marker_memory: MarkerMemory = field(default_factory=MarkerMemory, init=False)
     board_reference: np.ndarray | None = field(default=None, init=False)
+    survey_votes: np.ndarray | None = field(default=None, init=False)
+    survey_samples: int = field(default=0, init=False)
+    survey_until: float = field(default=0.0, init=False)
     board_gain: np.ndarray | None = field(default=None, init=False)
     projections: deque = field(default_factory=lambda: deque(maxlen=16), init=False)
     walls: np.ndarray | None = field(default=None, init=False)
@@ -510,6 +513,31 @@ class Vision:
     calibration_warning: str = field(default="", init=False)
     calibration_canvas: np.ndarray | None = field(default=None, init=False)
     capture_error: str = field(default="", init=False)
+
+    def begin_survey(self, seconds=3.0):
+        """Read the board for a while and keep what was there most of the time.
+
+        Deciding the geometry afresh ten times a second makes a marginal stroke flicker,
+        and one pixel at a repair takes a whole enclosure with it, so the board appeared
+        to shade itself in and out while nobody touched it. A vote over a few seconds
+        settles that before anyone is playing on it.
+        """
+        with self.lock:
+            self.survey_votes = None
+            self.survey_samples = 0
+            self.survey_until = monotonic() + max(0.1, float(seconds))
+
+    def surveying(self):
+        with self.lock:
+            return self.survey_until > 0.0
+
+    def survey_progress(self):
+        with self.lock:
+            if self.survey_until <= 0.0:
+                return 1.0
+            left = self.survey_until - monotonic()
+            total = max(0.1, float(self.config.get("camera", {}).get("survey_seconds", 3.0)))
+            return float(min(1.0, max(0.0, 1.0 - left / total)))
 
     def set_projection(self, canvas, timestamp=None):
         """Hand over the frame just drawn, as an (h, w, 3) RGB array in logical pixels.
@@ -744,6 +772,8 @@ class Vision:
                     save_calibration(camera.get("calibration_file", "calibration.npz"), matrix, shape, (height, width))
                 except OSError as error:
                     self.calibration_warning = f"Calibration active but could not save: {error}"
+                self.survey_until = 0.0
+                self.survey_votes = None
                 self.calibration_requested.clear()
                 return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), self.walls,
                                       preview, True, self.calibration_warning)
@@ -767,7 +797,23 @@ class Vision:
             with self.lock:
                 if generation != self.calibration_generation:
                     return self.latest
-                self.walls = self.wall_filter.update(dark)
+                if self.survey_until > 0.0:
+                    # A vote across the whole window, not a verdict per frame.
+                    if self.survey_votes is None or self.survey_votes.shape != dark.shape:
+                        self.survey_votes = np.zeros(dark.shape, np.int32)
+                        self.survey_samples = 0
+                    self.survey_votes += dark
+                    self.survey_samples += 1
+                    if timestamp >= self.survey_until and self.survey_samples >= 3:
+                        share = float(self.config.get("camera", {}).get("survey_share", 0.45))
+                        settled = self.survey_votes >= max(1, int(self.survey_samples * share))
+                        self.walls = self.wall_filter.seed(settled)
+                        self.survey_until = 0.0
+                        self.survey_votes = None
+                    elif self.walls is None:
+                        self.walls = self.wall_filter.update(dark)
+                else:
+                    self.walls = self.wall_filter.update(dark)
                 self.last_wall_time = timestamp
         return VisionSnapshot(timestamp, MappingProxyType(aims), MappingProxyType(confidence),
                               self.walls, preview, True, self.calibration_warning)

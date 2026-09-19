@@ -68,6 +68,14 @@ Because artwork is now predicted away rather than merely outshone, the earlier c
 
 Measured on September 19, 2026 with a hand held in the beam: drawn ink alone held the board at 2297-2766 wall pixels, and a hand added between 8,000 and 32,000, appearing in the mask as a recognizable hand with separated fingers. A 22-sample control run with nothing in front of the projector produced a median of 84 and a peak of 170 excess wall pixels, 0.018 percent of the canvas, all of it thin-ink flicker below the component floor; the obstacle path contributed nothing at all. That is about a hundredfold separation. Hands entering from the edge of the board stay open regions rather than closed shapes, so they are solid without being filled or drawn as rocks.
 
+# Settling the board before a match
+
+Deciding the geometry afresh ten times a second makes a marginal stroke flicker, and one pixel at a repair takes a whole enclosure with it. Measured on a still board that nobody was touching, filled bodies came and went between six and ten while the solid area swung by a factor of two: the board appeared to shade itself in and out on its own.
+
+`Vision.begin_survey(seconds)` reads the board for `camera.survey_seconds` and keeps what was there in at least `camera.survey_share` of the frames, seeding the filter with that vote instead of a per-frame verdict. The launcher runs it after calibration and again before each match starts, showing the map as it settles so everyone can see the board they are about to play on, and the existing countdown then runs before anyone may move. `camera.wall_persistence` also rose from 3 to 8, which on its own took shimmering pixels from about 3500 to 24.
+
+After the survey, on the same still board: filled bodies 8 to 9, solid area varying 17.6 percent rather than 100, and 608 flickering pixels rather than 3469. Live updates still run during play, so a drawing or a hand still registers; `camera.wall_update_hz = 0` freezes the surveyed map outright if a demo wants no movement at all.
+
 # Reading the drawing at calibration
 
 A successful calibration scans the board from the same frame that produced the mapping and publishes the result at once, so a drawing is solid the moment calibration finishes rather than after the persistence filter fills in. This frame is the cleanest read the rig ever gets, because the projector is showing the calibration screen's flat white field instead of game art. The four projected markers are dark by construction and are excluded from the scan with a `wall_stroke` margin. `WallFilter.seed` adopts the scan outright; a deliberate board read needs no repeat confirmation.
