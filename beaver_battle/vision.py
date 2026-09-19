@@ -24,6 +24,9 @@ CORNER_NAMES = {0: "top-left", 1: "top-right", 2: "bottom-right", 3: "bottom-lef
 MARKER_CLIP_LIMIT = 8.0
 MARKER_TILES = 16
 MARKER_MEMORY_SECONDS = 2.0
+WALL_THRESHOLD = 75
+WALL_CONTRAST = 30
+WALL_STROKE = 21
 
 
 def capture_backend(name=""):
@@ -202,6 +205,42 @@ def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180):
             if np.isfinite(point).all() and 0 <= point[0] < width and 0 <= point[1] < height]
 
 
+def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WALL_STROKE):
+    """Mark physical ink: pixels darker than the board immediately around them.
+
+    An absolute cutoff alone cannot find a drawing on a projected surface. Measured on the
+    mounted rig, glare moves the bare board between about 158 and 212 while a black stroke
+    photographs near 150 once the lens blurs it against a lit background, so no single
+    cutoff separates them. A black-hat transform asks the question that survives the
+    gradient instead: is this pixel darker than the board beside it. The absolute cutoff
+    stays as an OR so that genuinely dark regions wider than the kernel still register.
+
+    The strongest channel is used, so saturated red ink stays reserved for laser dots.
+    """
+    gray = warped if warped.ndim == 2 else np.max(warped, axis=2)
+    size = max(3, int(stroke) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    relief = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+    return (relief >= int(contrast)) | (gray < int(threshold))
+
+
+def scan_board(warped, width, height, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST,
+               stroke=WALL_STROKE):
+    """Read the drawing from the calibration screen, whose bright field is known.
+
+    This is the cleanest observation of physical ink the rig ever gets: the projector is
+    showing a flat white field rather than game art, so anything locally dark is on the
+    board. The four projected markers are dark by construction and are excluded.
+    """
+    mask = ink_mask(warped, threshold, contrast, stroke)
+    margin = max(3, int(stroke))
+    for corners in marker_layout(width, height).values():
+        left, top = corners[0].astype(int) - margin
+        right, bottom = corners[2].astype(int) + margin
+        mask[max(0, top):max(0, bottom), max(0, left):max(0, right)] = False
+    return mask
+
+
 @dataclass
 class WallFilter:
     persistence: int = 3
@@ -217,6 +256,13 @@ class WallFilter:
                                  np.minimum(self.evidence, 0) - 1).clip(-limit, limit)
         self.mask[self.evidence >= limit] = True
         self.mask[self.evidence <= -limit] = False
+        return readonly(self.mask)
+
+    def seed(self, mask):
+        """Adopt a scan outright; a calibration board read needs no repeat confirmation."""
+        limit = max(1, min(127, int(self.persistence)))
+        self.evidence = np.where(mask, limit, -limit).astype(np.int16)
+        self.mask = np.array(mask, dtype=bool)
         return readonly(self.mask)
 
 
@@ -351,6 +397,12 @@ class Vision:
     calibration_warning: str = field(default="", init=False)
     calibration_canvas: np.ndarray | None = field(default=None, init=False)
     capture_error: str = field(default="", init=False)
+
+    def ink_settings(self):
+        camera = self.config.get("camera", {})
+        return (int(camera.get("wall_threshold", WALL_THRESHOLD)),
+                int(camera.get("wall_contrast", WALL_CONTRAST)),
+                int(camera.get("wall_stroke", WALL_STROKE)))
 
     def dimensions(self):
         display = self.config.get("display", {})
@@ -537,7 +589,8 @@ class Vision:
                 self.marker_memory.clear()
                 self.tracker.tracks.clear()
                 self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
-                self.walls = None
+                scan = cv2.warpPerspective(frame, matrix, (width, height), borderValue=(255, 255, 255))
+                self.walls = self.wall_filter.seed(scan_board(scan, width, height, *self.ink_settings()))
                 self.last_wall_time = timestamp
                 self.wall_resume = timestamp + 0.5
                 self.calibration_warning = ""
@@ -546,7 +599,7 @@ class Vision:
                 except OSError as error:
                     self.calibration_warning = f"Calibration active but could not save: {error}"
                 self.calibration_requested.clear()
-                return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
+                return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), self.walls,
                                       preview, True, self.calibration_warning)
         if self.matrix is None:
             return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
@@ -554,9 +607,11 @@ class Vision:
         points = laser_candidates(frame, self.matrix, width, height,
                                   int(camera.get("laser_min_area", 1)), int(camera.get("laser_max_area", 180)))
         aims, confidence = self.tracker.update(points, timestamp, identity, ready_since)
-        if timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / max(0.1, float(camera.get("wall_update_hz", 10))):
+        rate = float(camera.get("wall_update_hz", 10))
+        # A zero rate keeps the calibration board scan and stops re-reading under game art.
+        if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:
             warped = cv2.warpPerspective(frame, self.matrix, (width, height), borderValue=(255, 255, 255))
-            dark = np.max(warped, axis=2) < int(camera.get("wall_threshold", 75))
+            dark = ink_mask(warped, *self.ink_settings())
             with self.lock:
                 if generation != self.calibration_generation:
                     return self.latest

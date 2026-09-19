@@ -12,8 +12,9 @@ import numpy as np
 
 from beaver_battle.vision import (LaserTracker, MarkerMemory, Vision, WallFilter,
                                   calibration_image, capture_backend, detect_markers,
-                                  find_calibration, laser_candidates, load_calibration,
-                                  marker_message, save_calibration)
+                                  find_calibration, ink_mask, laser_candidates,
+                                  load_calibration, marker_layout, marker_message,
+                                  save_calibration, scan_board)
 
 
 def check_calibration():
@@ -72,6 +73,60 @@ def check_marker_memory():
     targets = np.float32([(400, 240), (100, 100), (700, 400)])
     recovered = cv2.perspectiveTransform(targets[None], matrix)[0]
     assert np.max(np.linalg.norm(recovered - targets, axis=1)) < 2
+
+
+def lit_board(width, height):
+    """A projected whiteboard: bright, unevenly lit, with a thin drawn circle."""
+    glare = np.linspace(210, 158, width, dtype=np.float32)[None, :].repeat(height, 0)
+    glare[height // 3:height // 2] += 18
+    board = np.clip(glare, 0, 255).astype(np.uint8)
+    board = cv2.cvtColor(board, cv2.COLOR_GRAY2BGR)
+    cv2.circle(board, (width // 2, height // 2), min(width, height) // 6, (150, 148, 152), 3)
+    return cv2.GaussianBlur(board, (3, 3), 0)
+
+
+def check_ink():
+    width, height = 1280, 720
+    board = lit_board(width, height)
+    # The measured board runs brighter than any usable absolute cutoff, ink included.
+    assert not (np.max(board, axis=2) < 75).any(), "This board defeats an absolute cutoff entirely"
+    mask = ink_mask(board)
+    circle = np.zeros((height, width), np.uint8)
+    cv2.circle(circle, (width // 2, height // 2), min(width, height) // 6, 1, 15)
+    on_target = int((mask & circle.astype(bool)).sum())
+    assert on_target > 1000, f"Local contrast must find the drawing, found {on_target}"
+    assert int(mask.sum()) - on_target < on_target // 10, "Glare and gradient must not read as ink"
+
+    bright = cv2.cvtColor(np.full((height, width), 190, np.uint8), cv2.COLOR_GRAY2BGR)
+    assert not ink_mask(bright).any(), "A blank bright board holds no ink"
+    dark_room = cv2.cvtColor(np.full((height, width), 40, np.uint8), cv2.COLOR_GRAY2BGR)
+    assert ink_mask(dark_room).all(), "The absolute cutoff still covers areas wider than the kernel"
+    red = np.zeros((height, width, 3), np.uint8)
+    red[:, :, 2] = 255
+    assert not ink_mask(red).any(), "Saturated red stays reserved for laser dots"
+
+
+def check_scan():
+    """Calibration reads the board against the marker screen, whose markers are dark by design."""
+    width, height = 1280, 720
+    board = lit_board(width, height)
+    for corners in marker_layout(width, height).values():
+        left, top = corners[0].astype(int)
+        right, bottom = corners[2].astype(int)
+        board[top:bottom + 1, left:right + 1] = 20
+    assert ink_mask(board)[:200, :200].any(), "A projected marker is dark enough to look like ink"
+    scanned = scan_board(board, width, height)
+    for corners in marker_layout(width, height).values():
+        left, top = corners[0].astype(int)
+        right, bottom = corners[2].astype(int)
+        assert not scanned[top:bottom + 1, left:right + 1].any(), "Markers must not become walls"
+    assert scanned.sum() > 1000, "The drawing must survive marker exclusion"
+
+    seeded = WallFilter(3)
+    published = seeded.seed(scanned)
+    assert np.array_equal(published, scanned), "A board scan is adopted without repeat confirmation"
+    assert not published.flags.writeable
+    assert np.array_equal(seeded.update(scanned), scanned), "A confirming frame keeps the scan"
 
 
 def check_backend():
@@ -160,7 +215,10 @@ def check_pipeline():
         assert not vision.process_frame(blank, 1.0).calibrated
         vision.begin_calibration()
         calibrated = vision.process_frame(calibration_image(width, height), 1.1)
-        assert calibrated.calibrated and calibrated.walls is None
+        assert calibrated.calibrated
+        # Calibration reads the board immediately, and its own markers are not the board.
+        assert calibrated.walls is not None and not calibrated.walls.any()
+        assert not calibrated.walls.flags.writeable
         frame = blank.copy()
         frame[150:220, 350:365] = 15
         frame[50:100, 100:200] = (255, 80, 20)
@@ -341,6 +399,8 @@ def check_worker():
 
 
 check_calibration()
+check_ink()
+check_scan()
 check_marker_memory()
 check_backend()
 check_candidates()
@@ -349,5 +409,5 @@ check_walls()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, drawn ink and board scan, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")
