@@ -366,3 +366,38 @@ window length, so identity should be taken while a player is reasonably still an
 carried by ordinary motion tracking.
 
 ## Checks
+
+## Bringing up a replacement controller board
+
+Flash with `compile --upload`, never `upload` alone:
+
+    arduino-cli compile --upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 \
+        firmware/arduino/controller_espnow_2
+
+`arduino-cli upload` on its own re-flashes whatever is in the build cache and silently
+ignores edits to the sketch. That cost a debugging cycle here: a baud change was made,
+uploaded, and the board came back still running the old value, which reads as corruption
+rather than as a stale binary.
+
+Check the banner before trusting the board. It names the controller, the channel it
+actually joined, and the button pins:
+
+    controller 2 over ESP-NOW on channel 1 (asked for 1); fire GPIO14, special GPIO27
+
+Then check the laser before wiring anything else to it, because a laser that is wired to
+the wrong pad looks exactly like a dim laser from the camera's side. With the board on USB,
+`l` forces the laser solid, `o` forces it off, `b` returns it to the FIRE button, `?`
+reports state, and `p<n>` moves the laser to GPIO<n>. Force it solid and confirm a bright
+red dot. If it stays dark, the wire is not on GPIO25.
+
+`p<n>` refuses GPIO 0, 2, 12 and 15 and the flash pins 6 to 11. This is not a formality.
+Driving GPIO12, which is MTDI and selects flash voltage at reset, left one board booting to
+`invalid header: 0xffffffff` about thirty times a second. It could not be recovered: with
+BOOT held it still reported boot mode `0x1f`, meaning GPIO0 never went low, and the one
+download-mode window that was reached answered "failed to communicate with the flash chip".
+Eighteen further attempts never reached download mode again. Treat the strapping pins as
+off limits rather than as something to be careful around.
+
+Boot mode `0x1f` on its own is not a fault. It prints as `SPI_FAST_FLASH_BOOT` exactly as
+the healthy `0x13` does; the difference is only floating pins once the wiring is off. The
+fault to look for is `invalid header: 0xffffffff`, which says the flash did not read back.
