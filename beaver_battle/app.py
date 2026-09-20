@@ -421,7 +421,7 @@ def main():
             for number in range(beavers):
                 face = game.portrait(number + 1, 2.2)
                 screen.blit(face, face.get_rect(center=(card.centerx + (number * 2 - (beavers - 1)) * 62, card.y + 78)))
-            name = sprites.fitted(sprites.label(title, 58, sprites.BLUE_BRIGHT), card.width - 30)
+            name = sprites.fit_width(sprites.label(title, 58, sprites.BLUE_BRIGHT), card.width - 30)
             screen.blit(name, name.get_rect(center=(card.centerx, card.y + 168)))
             for row, line in enumerate(lines):
                 image = sprites.sign(line, 26 if len(options) == 2 else 22, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)

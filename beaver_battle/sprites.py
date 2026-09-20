@@ -103,7 +103,7 @@ def lettering(message, size, color, spacing=0):
     return image
 
 
-def fitted(image, width):
+def fit_width(image, width):
     """An image shrunk, if it must be, to fit a width: header text never runs into its neighbours."""
     if image.get_width() <= width:
         return image
