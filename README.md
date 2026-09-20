@@ -45,7 +45,7 @@ Calibration markers are read through local contrast equalization and gathered ov
 
 The lowest connected controller ID operates menus. A disconnected controller or stale camera pauses physical play. Reconnect and choose Resume. Keyboard equivalents are Down/Tab, Enter/Space, Esc, and `C` for calibration. `F2` shows camera preview in the lobby/pause screen.
 
-Canoes always move forward; aim near the canoe or uncertain tracking retains heading. Three shots empty the primary reserve and trigger a full recharge; new weapon activations are blocked during recharge. First damage ejects the beaver; second damage eliminates it. Wall collisions bounce or slide without damage. Last survivor wins the round; first to five rounds wins the match. Barrels/asteroids drop lasers, jousters, and mines; turrets and cycling death beams add hazards.
+Canoes always move forward; aim near the canoe or uncertain tracking retains heading. A canoe holds three rocks and each comes back on its own after a second. First damage ejects the beaver; a second hit, or any canoe running it over, sinks it, but a beaver that survives seven seconds in the water gets a fresh canoe with a moment of grace. Canoes hug and slide along edges without damage. Whoever sinks a beaver scores the point; a round ends when one canoe is left, and the match ends at the end of a round once someone leads with five (a shared lead plays on). These are Astro Party's rules; `reload_mode`, `canoe_return`, `ram_swimmers` and `scoring` in `config.toml` switch each back to the original overheat, no-return, last-survivor rules. Barrels/asteroids drop lasers, jousters, and mines; turrets and cycling death beams add hazards.
 
 ## Configuration
 

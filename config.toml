@@ -54,7 +54,13 @@ beaver_speed = 75.0
 beaver_boost_speed = 150.0
 shot_interval = 0.30
 magazine = 3
-reload_seconds = 2.5
+reload_seconds = 2.5 # Whole-magazine lockout, used only when reload_mode = "magazine".
+reload_mode = "each" # Astro Party: rocks come back one at a time. "magazine" is the old overheat rule.
+reload_each = 1.0 # Seconds for one rock to come back.
+canoe_return = 7.0 # A beaver that survives this long in the water gets a new canoe; 0 means never.
+return_invulnerability = 1.5 # Grace after the new canoe arrives, so it cannot be sunk on the spot.
+ram_swimmers = true # A canoe running over a swimming beaver sinks it.
+scoring = "kills" # A point to whoever sinks a beaver. "survivor" gives the last one afloat the point.
 rock_speed = 650.0
 rock_lifetime = 2.0
 invulnerability = 0.8

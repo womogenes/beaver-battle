@@ -73,6 +73,7 @@ def build():
         "thud": mix(sweep(.11, 190, 80) * decay(.11, 26), noise(.04, 12) * decay(.04, 60) * .5),
         "crack": mix(noise(.22, 5, 4) * decay(.22, 16), sweep(.16, 240, 70) * decay(.16, 18) * .7),
         "pickup": mix(sweep(.05, 300, 1500) * decay(.05, 30), after(.03, notes((784, 1047, 1568), .1) * .7)),
+        "return": mix(notes((392, 523, 659, 784), .09, rate=10) * .6, sweep(.3, 200, 900) * decay(.3, 8, .05) * .3),
         "charm": sweep(.2, 500, 1100) * decay(.2, 9, .03) * .35,
         "whoosh": noise(.5, 24, 14) * np.sin(np.pi * span(.5) / .5) ** 2 * .6,
         "powerup": sweep(.32, 330, 1320, "square") * decay(.32, 6, .02) * .45,

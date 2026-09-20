@@ -37,6 +37,7 @@ class Juice:
     bursts: list = field(default_factory=list)
     rings: list = field(default_factory=list)
     ghosts: list = field(default_factory=list)
+    scores: list = field(default_factory=list)
     bodies: dict = field(default_factory=dict)
     pops: dict = field(default_factory=dict)
     shake: float = 0.0
@@ -92,6 +93,13 @@ class Juice:
                 self.spray(pos, 14, 380, color, 6, .45, kind="star")
                 self.spray(pos, 8, 260, sprites.BUTTER, 5, .4)
                 self.pops[player_id] = 1.0
+            elif kind == "score":
+                self.scores.append([pos.copy(), 0.0, event[2]])
+            elif kind == "return":
+                color = self.color(event[2])
+                self.rings.append([pos.copy(), 0.0, .45, 90 * self.scale, color])
+                self.spray(pos, 16, 360, color, 6, .5, kind="star")
+                self.spray(pos, 10, 300, sprites.SKY, 5, .45, kind="drop")
             elif kind == "shoot":
                 body = self.bodies.get(event[2])
                 if body:
@@ -174,6 +182,9 @@ class Juice:
             ghost[1].y += 900 * self.scale * dt
             ghost[2] += dt
         self.ghosts = [ghost for ghost in self.ghosts if ghost[2] < ghost[3]]
+        for score in self.scores:
+            score[1] += dt
+        self.scores = [score for score in self.scores if score[1] < 1.1]
         for player_id in list(self.pops):
             self.pops[player_id] = max(0.0, self.pops[player_id] - 3.2 * dt)
         self.shake *= .0006 ** dt
@@ -226,6 +237,15 @@ class Juice:
                 if radius > 2.5:
                     pygame.draw.circle(surface, sprites.INK, (x, y), radius + ink)
                 pygame.draw.circle(surface, color, (x, y), radius)
+
+    def draw_scores(self, surface):
+        """+1 pops out of a sinking in the scorer's colour and floats up."""
+        for pos, age, player_id in self.scores:
+            grow = 1 + 1.4 * max(0, 1 - age / .14) ** 2
+            image = sprites.label("+1", max(14, round(54 * self.scale)), self.color(player_id), tilt=-6)
+            if grow > 1.01:
+                image = pygame.transform.rotozoom(image, 0, grow)
+            surface.blit(image, image.get_rect(center=(pos.x, pos.y - (30 + 70 * age) * self.scale)))
 
     def draw_ghosts(self, surface, portrait):
         """A sunk beaver is flung off the board, spinning and looming toward the audience."""

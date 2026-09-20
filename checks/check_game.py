@@ -20,6 +20,8 @@ from beaver_battle.model import PlayerInput
 pygame.init()
 with open("config.toml", "rb") as source:
     config = tomllib.load(source)
+# These checks describe the original rule set; checks/check_rules.py covers the Astro Party one.
+config["game"].update(reload_mode="magazine", canoe_return=0, scoring="survivor", ram_swimmers=False)
 
 
 def arena(players=(1, 2), moving=False):

@@ -36,6 +36,7 @@ class Player:
     joust: float = 0.0
     bounce: float = 0.0
     wall: pygame.Vector2 = field(default_factory=pygame.Vector2)
+    rescue: float = 0.0
     knock: pygame.Vector2 = field(default_factory=pygame.Vector2)
 
 
@@ -700,6 +701,11 @@ class Game:
             if target.state == "eliminated" or target.invulnerability > 0:
                 return False
             target.state = "beaver" if target.state == "canoe" else "eliminated"
+            target.rescue = self.setting("canoe_return", 7)
+            if target.state == "eliminated" and self.setting("scoring", "kills") == "kills" and by in self.scores and by != target.player_id:
+                # Astro Party scoring: the point goes to whoever sank them, not to the last one afloat.
+                self.scores[by] += 1
+                self.fx.append(("score", target.pos.copy(), by))
             sunk = target.state == "eliminated"
             final = sunk and sum(player.state != "eliminated" for player in self.players.values()) <= 1
             self.sounds.append("splash" if sunk else "hit")
@@ -753,7 +759,7 @@ class Game:
 
     def activate(self, player):
         kind = player.powerup
-        if not kind or player.reload > 0 or player.state != "canoe":
+        if not kind or player.state != "canoe" or (player.reload > 0 and self.setting("reload_mode", "each") != "each"):
             return
         if kind == "laser":
             end, target = self.trace(player.pos, player.pos + direction(player.heading) * self.width * 2,
@@ -834,11 +840,25 @@ class Game:
             player.invulnerability = countdown(player.invulnerability, dt)
             player.cooldown = countdown(player.cooldown, dt)
             player.joust = countdown(player.joust, dt)
+            each = self.setting("reload_mode", "each") == "each"
             if player.reload > 0:
                 player.reload = countdown(player.reload, dt)
                 if player.reload == 0:
-                    player.ammo = self.setting("magazine", 3)
-                    self.sounds.append("reload")
+                    player.ammo = min(self.setting("magazine", 3), player.ammo + 1) if each else self.setting("magazine", 3)
+                    if player.ammo < self.setting("magazine", 3):
+                        player.reload = self.setting("reload_each", 1.0)
+                    else:
+                        self.sounds.append("reload")
+            if player.state == "beaver" and self.setting("canoe_return", 7) > 0:
+                # Survive long enough in the water and a fresh canoe arrives, with a moment's grace.
+                player.rescue = countdown(player.rescue, dt)
+                home = self.nearest_free(player.pos, 18 * self.scale, player) if player.rescue == 0 else None
+                if home is not None:
+                    player.state, player.pos, player.radius = "canoe", home, 18 * self.scale
+                    player.ammo, player.reload, player.knock = self.setting("magazine", 3), 0.0, pygame.Vector2()
+                    player.invulnerability = self.setting("return_invulnerability", 1.5)
+                    self.sounds.append("return")
+                    self.fx.append(("return", player.pos.copy(), player.player_id))
             player.bounce = countdown(player.bounce, dt)
             wish, rate = player.heading, math.radians(self.setting("turn_speed", 240))
             if control.connected and control.aim is not None and control.aim_age <= self.config.get("camera", {}).get("stale_seconds", .5):
@@ -887,12 +907,20 @@ class Game:
             player.wall = blocked
             if player.knock.length_squared() > 4:
                 player.knock = self.move(player, player.knock, dt) * .0009 ** dt
-            if fire and player.state == "canoe" and player.reload == 0 and player.cooldown == 0:
+            if fire and player.state == "canoe" and player.cooldown == 0 and (player.ammo > 0 if each else player.reload == 0):
                 self.shoot(player.player_id, player.pos, player.heading, player.radius)
                 player.ammo -= 1
                 player.cooldown = self.setting("shot_interval", .30)
-                if player.ammo <= 0:
+                if each:
+                    player.reload = player.reload or self.setting("reload_each", 1.0)
+                elif player.ammo <= 0:
                     player.reload = self.setting("reload_seconds", 2.5)
+            if player.state == "canoe" and self.setting("ram_swimmers", True):
+                # A beaver in the water is fragile: a canoe only has to run it over.
+                for other in self.players.values():
+                    if other.state == "beaver" and other is not player and other.pos.distance_to(player.pos) <= player.radius + other.radius:
+                        if self.hit(other, push=direction(player.heading), by=player.player_id):
+                            self.sounds.append("ram")
             special = control.special and control.connected
             if special and not player.special_held:
                 self.activate(player)
@@ -920,9 +948,20 @@ class Game:
         survivors = [player.player_id for player in self.players.values() if player.state != "eliminated"]
         if len(self.players) > 1 and len(survivors) <= 1:
             self.winner = survivors[0] if survivors else None
-            if self.winner is not None:
-                self.scores[self.winner] += 1
-            self.phase = "match_over" if self.winner is not None and self.scores[self.winner] >= self.setting("winning_score", 5) else "round_over"
+            goal = self.setting("winning_score", 5)
+            if self.setting("scoring", "kills") == "kills":
+                # Points were scored as beavers sank. Reaching the goal ends the match at the end of a
+                # round, unless the lead is shared: then play on until somebody is ahead (overtime).
+                best = max(self.scores.values())
+                leaders = [player_id for player_id, score in self.scores.items() if score == best]
+                done = best >= goal and len(leaders) == 1
+                if done:
+                    self.winner = leaders[0]
+            else:
+                if self.winner is not None:
+                    self.scores[self.winner] += 1
+                done = self.winner is not None and self.scores[self.winner] >= goal
+            self.phase = "match_over" if done else "round_over"
             self.sounds.append("fanfare" if self.phase == "match_over" else "win")
             self.fx.append(("round", None, self.winner, self.phase == "match_over"))
             self.round_timer = self.setting("round_delay", 3)
@@ -1195,7 +1234,15 @@ class Game:
                 for rock in range(self.setting("magazine", 3)):
                     center = player.pos + pygame.Vector2((rock - (self.setting("magazine", 3) - 1) / 2) * 10 * unit, player.radius * 2 + 8 * unit)
                     pygame.draw.circle(surface, INK, center, 4 * unit)
-                    pygame.draw.circle(surface, sprites.STONE if rock < player.ammo and not player.reload else sprites.WHITE, center, 2.6 * unit)
+                    loaded = rock < player.ammo and (self.setting("reload_mode", "each") == "each" or not player.reload)
+                    pygame.draw.circle(surface, sprites.STONE if loaded else sprites.WHITE, center, 2.6 * unit)
+            elif player.rescue > 0 and self.setting("canoe_return", 7) > 0:
+                # A ring that fills as the new canoe gets closer.
+                ring = pygame.Rect(0, 0, player.radius * 5.2, player.radius * 5.2)
+                ring.center = player.pos
+                done = 1 - player.rescue / self.setting("canoe_return", 7)
+                pygame.draw.arc(surface, INK, ring.inflate(4 * unit, 4 * unit), math.pi / 2 - done * math.tau, math.pi / 2, max(2, round(7 * unit)))
+                pygame.draw.arc(surface, color, ring, math.pi / 2 - done * math.tau, math.pi / 2, max(1, round(4 * unit)))
         for effect in self.effects:
             if effect.kind == "laser":
                 pygame.draw.line(surface, INK, effect.start, effect.end, max(3, round(12 * unit)))
@@ -1207,6 +1254,7 @@ class Game:
                                    max(1, round(radius)), max(1, round(5 * unit)))
         juice.draw_over(surface)
         juice.draw_ghosts(surface, self.portrait)
+        juice.draw_scores(surface)
         juice.present(surface, screen)
         surface = screen
         goal = self.setting("winning_score", 5)
