@@ -40,7 +40,7 @@ def main():
     bridge.send(now, force=True)
     assert bridge.controllers[1].desired[0]
     bridge.stop()
-    print('Network checks passed: malformed/reordered packets, conflicts, restart, timeout, feedback and wrapping')
+    print('Network checks passed: malformed/reordered packets, conflicts, restart, timeout, feedback and wrapping', flush=True)
 
 
 main()
@@ -58,6 +58,23 @@ class RecordingVision:
         self.identity, self.ready_since = identity, ready_since
 
 
+def poll_until(bridge, now, wanted, limit=2.0):
+    """Poll until a sent datagram has actually landed.
+
+    sendto returns once the packet is queued, not once the socket is readable, so a single
+    poll races delivery. That race was won on the machine this was written on and lost on
+    the next one, where every run of this check failed on a first packet that simply had
+    not arrived yet. Waiting for it keeps the real socket under test without the timing.
+    """
+    deadline = time.monotonic() + limit
+    while True:
+        bridge.poll(now)
+        if wanted in bridge.active_ids(now):
+            return
+        assert time.monotonic() < deadline, f"controller {wanted} never arrived over UDP"
+        time.sleep(0.005)
+
+
 def check_identity():
     config = dict(network=dict(bind='127.0.0.1', port=0, timeout=0.5),
                   camera=dict(stale_seconds=0.5, identity_interval=1.5, identity_window=0.18, identity_settle=0.08),
@@ -72,7 +89,7 @@ def check_identity():
         now = 100.0
         packet = dict(v=1, type='input', id=1, boot=20, seq=0, buttons=0, command_seq=0, laser=True)
         peer.sendto(json.dumps(packet).encode(), bridge.connection.getsockname())
-        bridge.poll(now)
+        poll_until(bridge, now, 1)
         scheduler.update(now, bridge, vision, True)
         assert vision.identity == 1 and vision.ready_since == float('inf')
         assert not bridge.acknowledged(now)  # No command has been sent yet.
@@ -102,7 +119,7 @@ def check_identity():
     finally:
         bridge.stop()
         peer.close()
-    print('Identity checks passed: UDP, command acknowledgements, mid-window rejoin and dropout lease')
+    print('Identity checks passed: UDP, command acknowledgements, mid-window rejoin and dropout lease', flush=True)
 
 
 check_identity()
@@ -141,7 +158,7 @@ def check_all_on():
         assert scheduler.next_probe >= vision.ready_since + .15
     finally:
         bridge.stop()
-    print('All-on checks passed: restore acknowledgements and minimum observation interval')
+    print('All-on checks passed: restore acknowledgements and minimum observation interval', flush=True)
 
 
 check_all_on()
