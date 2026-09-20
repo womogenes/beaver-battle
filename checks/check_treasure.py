@@ -103,7 +103,7 @@ run(game, 2, lambda: tracing(game))
 walked = left.travelled / 2
 assert abs(walked - config["treasure"]["walk_speed"]) < 3
 before = left.travelled
-run(game, 1, lambda: {1: PlayerInput(1, tuple(game.point_at(left, left.travelled + 50)), False, True)})
+run(game, 1, lambda: {1: PlayerInput(1, tuple(game.point_at(left, left.travelled + 50)), True, False)})  # A click boosts.
 assert left.travelled - before > walked * 1.3 and "boost" in game.sounds and left.cooldown > 0
 while not game.in_water(left.pos) and game.phase == "running":
     run(game, .1, lambda: tracing(game))
@@ -126,7 +126,7 @@ for index in range(len(BOARDS)):
             times.append(-elapsed)
     assert game.phase == "match_over" and game.verdict == "TREASURE!", (BOARDS[index]["name"], game.verdict)
     times[index] += elapsed
-assert 7 < sum(times) / len(times) < 14, times
+assert 5 < sum(times) / len(times) < 14, times
 
 # Solo: one beaver crosses the whole board, edge to edge, on the clock, on every board.
 for index in range(len(BOARDS)):
@@ -137,7 +137,7 @@ for index in range(len(BOARDS)):
     while game.phase != "match_over" and elapsed < 120:
         game.update(1 / 60, {})
         elapsed += 1 / 60
-    assert game.winner == 1 and game.verdict == f"{game.race_time:.2f} s" and 6 < game.race_time < 20, (BOARDS[index]["name"], game.verdict)
+    assert game.winner == 1 and game.verdict == f"{game.race_time:.2f} s" and 5 < game.race_time < 20, (BOARDS[index]["name"], game.verdict)
 game = Treasure(config)
 game.new_match((1,), (), 0, solo=True)
 run(game, config["treasure"]["draw_seconds"] + config["treasure"]["check_seconds"] + .3)

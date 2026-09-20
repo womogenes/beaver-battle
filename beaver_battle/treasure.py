@@ -382,7 +382,8 @@ class Treasure:
             else:
                 control = inputs.get(runner.player_id)
                 aim = pygame.Vector2(control.aim) if control is not None and control.aim is not None else None
-                special = bool(control is not None and control.special)
+                # In the race either button is the boost: a click on a laptop, button 1 or 2 on a controller.
+                special = bool(control is not None and (control.special or control.fire))
             if special and not runner.special_held and runner.cooldown == 0:
                 runner.boost, runner.cooldown = self.setting("boost_seconds", .8), self.setting("boost_cooldown", 3.5)
                 self.sounds.append("boost")
@@ -397,7 +398,7 @@ class Treasure:
             target = self.traced(runner, aim)
             if target <= runner.travelled:
                 continue
-            pace = self.setting("swim_speed" if swimming else "walk_speed", 46 if swimming else 66) * self.scale
+            pace = self.setting("swim_speed" if swimming else "walk_speed", 48 if swimming else 68) * self.scale
             pace *= self.setting("boost_factor", 2.2) if runner.boost > 0 else 1
             pace *= self.setting("solo_pace", 1.5) if self.solo else 1  # Twice the distance, so a brisker beaver.
             ahead = min(target, runner.travelled + pace * dt)
@@ -580,9 +581,14 @@ class Treasure:
                 pygame.draw.rect(frame, sprites.BUTTER if ready >= 1 else colors[runner.player_id], (meter.x, meter.y, meter.width * ready, meter.height), border_radius=round(8 * unit))
                 word = sprites.sign("BOOST", max(12, round(18 * unit)))
                 frame.blit(word, word.get_rect(center=(meter.centerx, meter.bottom + 14 * unit)))
+        hint = ""
         if self.phase == "drawing" and self.drawing and not self.camera_ink:
-            hint = sprites.sign("Hold the left button to draw.  Right click when you are done.", max(14, round(24 * unit)))
-            frame.blit(hint, hint.get_rect(center=(self.width / 2, self.height - 26 * unit)))
+            hint = "Hold the left button to draw.  Right click when you are done."
+        elif self.phase == "running" and not self.camera_ink:
+            hint = "Keep the mouse on your line, just ahead of your beaver.  Click to boost!"
+        if hint:
+            words = sprites.sign(hint, max(14, round(24 * unit)))
+            frame.blit(words, words.get_rect(center=(self.width / 2, self.height - 26 * unit)))
         if self.phase == "match_over":
             veil = pygame.Surface(frame.get_size(), pygame.SRCALPHA)
             veil.fill((*sprites.INK, 90))
