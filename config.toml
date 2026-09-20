@@ -39,6 +39,7 @@ laser_max_area = 300 # Measured on the board, dots run to 210 with a median of 1
 # 180 cut through the top of the dot's own range and discarded about five percent of
 # real detections. Nothing else inside the board comes near this size.
 identity_interval = 1.5
+identity_mode = "telemetry" # ESP-NOW gate reports; "acknowledged" for bidirectional Wi-Fi firmware.
 identity_window = 0.18
 identity_settle = 0.08
 stale_seconds = 0.5

@@ -186,6 +186,12 @@ class IdentityScheduler:
 
     def update(self, now, bridge, vision, enabled):
         ids = bridge.active_ids(now)
+        if self.config['camera'].get('identity_mode', 'acknowledged') == 'telemetry':
+            # ESP-NOW sends actual gate states but has no command return path.
+            # Identification follows the observed single-lit windows instead.
+            states = {player_id: bridge.controllers[player_id].laser for player_id in ids}
+            vision.set_laser_states(states if enabled else {}, now)
+            return
         if not enabled or not ids:
             self.target = None
             self.ready = None

@@ -25,3 +25,16 @@ Laser identity is controlled by explicit output state, with acknowledgements and
 ## Ownership
 
 Integrator owns this protocol. Firmware and Python bridge must use these exact keys and semantics. Extend by optional fields with defaults; coordinate incompatible changes and bump v.
+
+## ESP-NOW telemetry identification
+
+The Arduino ESP-NOW controllers broadcast inputs through a USB receiver and the serial
+relay; this transport has no laptop-to-controller command path. `command_seq` remains
+zero and must not be treated as an acknowledgement. With `camera.identity_mode =
+"telemetry"`, vision uses fresh reported `laser` gate states, matched to camera time,
+to identify a sole illuminated controller after `identity_settle`. Controller 1 stays
+steady while FIRE is held; controller 2 has a 176 ms dark gap every 800 ms. With both
+lit, a separately detected second dot can acquire the remaining identity only when the
+first dot is already confidently tracked. Missing, overlapping, stale, or ambiguous
+observations do not establish identity. This transport does not deliver servo feedback.
+The original bidirectional UDP firmware uses `identity_mode = "acknowledged"`.

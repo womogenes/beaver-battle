@@ -525,6 +525,9 @@ class Vision:
     frame: object = field(default=None, init=False)
     identity: int | None = field(default=None, init=False)
     identity_ready: float = field(default=0.0, init=False)
+    laser_telemetry: bool = field(default=False, init=False)
+    laser_history: deque = field(default_factory=lambda: deque(maxlen=256), init=False)
+    laser_frame_time: float = field(default=float("-inf"), init=False)
     matrix: np.ndarray | None = field(default=None, init=False)
     camera_shape: tuple | None = field(default=None, init=False)
     tracker: LaserTracker = field(default_factory=LaserTracker, init=False)
@@ -645,6 +648,71 @@ class Vision:
         with self.lock:
             self.identity = player_id
             self.identity_ready = float(ready_since)
+
+    def set_laser_states(self, states, timestamp):
+        """Publish actual gate reports, never desired outputs, in host monotonic time."""
+        states = dict(states)
+        if any(player not in (1, 2) or type(lit) is not bool for player, lit in states.items()):
+            raise ValueError("Laser states must map player IDs 1/2 to booleans")
+        timestamp = float(timestamp)
+        if not np.isfinite(timestamp):
+            raise ValueError("Laser telemetry timestamp must be finite")
+        stale = float(self.config.get("camera", {}).get("stale_seconds", 0.5))
+        with self.lock:
+            self.laser_telemetry = True
+            since = timestamp
+            if self.laser_history:
+                previous_time, previous_states, previous_since = self.laser_history[-1]
+                if timestamp <= previous_time:
+                    return
+                if states == previous_states and timestamp - previous_time <= stale:
+                    since = previous_since
+            self.laser_history.append((timestamp, states, since))
+
+    def telemetry_aims(self, points, timestamp):
+        """Match optical observations only to settled, contemporaneous gate reports."""
+        camera = self.config.get("camera", {})
+        stale = float(camera.get("stale_seconds", 0.5))
+        settle = float(camera.get("identity_settle", 0.08))
+        with self.lock:
+            history = [entry for entry in self.laser_history if entry[0] <= timestamp]
+        # A dark interval may occur entirely between camera frames. Its old identity
+        # must still be discarded before a newly visible dot can inherit it.
+        for moment, states, since in history:
+            if moment > self.laser_frame_time:
+                for player, track in self.tracker.tracks.items():
+                    if not states.get(player, False):
+                        track.valid = False
+        self.laser_frame_time = timestamp
+        if not history or timestamp - history[-1][0] > stale:
+            for track in self.tracker.tracks.values():
+                track.valid = False
+            return {}, {}
+        moment, states, since = history[-1]
+        lit = {player for player, on in states.items() if on}
+        for player, track in self.tracker.tracks.items():
+            if player not in lit:
+                track.valid = False
+        if timestamp - since < settle or not lit:
+            return {}, {}
+        if len(lit) == 1:
+            return self.tracker.update(points, timestamp, next(iter(lit)))
+        known = {player for player, track in self.tracker.tracks.items()
+                 if track.valid and timestamp - track.timestamp <= self.tracker.stale_seconds}
+        aims, confidence = self.tracker.update(points, timestamp)
+        # A uniquely continued identity labels one of two separate dots; only then
+        # can the remaining dot identify the other controller. One dot proves nothing
+        # about an untracked controller, even if telemetry says both gates are high.
+        if len(known) == 1 and len(aims) == 1 and len(points) == 2:
+            player = next(iter(aims))
+            distances = [np.linalg.norm(np.asarray(point) - aims[player]) for point in points]
+            remaining = int(np.argmax(distances))
+            if distances[remaining] > self.tracker.ambiguity_pixels:
+                other = next(iter(lit - {player}))
+                self.tracker.accept(other, points[remaining], timestamp, identified=True)
+                aims[other] = tuple(points[remaining])
+                confidence[other] = 0.9
+        return aims, confidence
 
     def begin_calibration(self):
         with self.lock:
@@ -814,7 +882,10 @@ class Vision:
                                   int(camera.get("laser_red_min", LASER_RED_MIN)),
                                   int(camera.get("laser_redness", LASER_REDNESS)),
                                   int(camera.get("laser_merge", LASER_MERGE)))
-        aims, confidence = self.tracker.update(points, timestamp, identity, ready_since)
+        if self.laser_telemetry:
+            aims, confidence = self.telemetry_aims(points, timestamp)
+        else:
+            aims, confidence = self.tracker.update(points, timestamp, identity, ready_since)
         rate = float(camera.get("wall_update_hz", 10))
         # A zero rate keeps the calibration board scan and stops re-reading under game art.
         if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:

@@ -162,3 +162,27 @@ def check_all_on():
 
 
 check_all_on()
+
+
+def check_telemetry_scheduler():
+    config = dict(network=dict(timeout=.5), camera=dict(identity_mode='telemetry'))
+    bridge = ControllerBridge(config)
+    class GateVision:
+        def set_laser_states(self, states, timestamp):
+            self.states, self.timestamp = states, timestamp
+    vision = GateVision()
+    scheduler = IdentityScheduler(config)
+    for player_id, lit in ((1, True), (2, False)):
+        data = dict(v=1, type='input', id=player_id, boot=1, seq=1,
+                    buttons=1, command_seq=0, laser=lit)
+        assert bridge.accept(json.dumps(data), ('127.0.0.1', 1000+player_id), 10)
+    scheduler.update(10.1, bridge, vision, True)
+    assert vision.states == {1: True, 2: False}, 'Gate reports must work without acknowledgements'
+    scheduler.update(10.2, bridge, vision, False)
+    assert vision.states == {}, 'Disabled identification must clear observations'
+    scheduler.update(10.6, bridge, vision, True)
+    assert vision.states == {}, 'Disconnected controllers must not identify a dot'
+    print('Telemetry scheduler checks passed')
+
+
+check_telemetry_scheduler()

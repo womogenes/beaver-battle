@@ -39,3 +39,13 @@ Coordinates are logical projector pixels, origin at top-left, x right and y down
 ## Astro Party rule alignment (2026-09-19)
 
 - Emily compared the game with Astro Party (wiki Gameplay and Powerups pages; no source publishes timings) and asked for its rules. Now the defaults: rocks return one at a time (`reload_mode = "each"`, `reload_each = 1.0`), a swimmer who survives `canoe_return = 7.0` s gets a new canoe with `return_invulnerability = 1.5` s, a canoe running over a swimmer sinks it (`ram_swimmers`), and the point goes to whoever does the sinking (`scoring = "kills"`), with the match decided at the end of a round and a shared lead playing on. The earlier decisions above (whole-magazine recharge, no return, last survivor scores) remain available through the same settings, and `checks/check_game.py` pins them; `checks/check_rules.py` covers the new set. Still unlike Astro Party: mines spare their owner, the jouster is timed, asteroids do not split.
+
+## Linux HDMI bench and ESP-NOW integration (2026-09-20)
+
+- HDMI projection and Arducam calibration were physically verified on this Linux laptop.
+  Both controller IDs reached the USB receiver at approximately 50 packets/second.
+- The ESP-NOW sketches report actual laser state but cannot acknowledge laptop commands.
+  The old identification scheduler therefore kept all aims disabled. The default is now
+  telemetry identification (see PROTOCOL.md); bidirectional Wi-Fi remains an explicit
+  acknowledged mode. Optical acquisition still requires visible, separate dots and
+  stable gate observations. A radio connection alone is not a tracking success.
