@@ -28,6 +28,16 @@ def burst(surface, center, reach, color, twist=.3):
         pygame.draw.polygon(surface, fill, points)
 
 
+def laser(surface, source, target):
+    """A laser pointer's beam and the dot where it lands. Red is fine here: a thumbnail is never projected."""
+    glow = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    for wide, shade in ((26, (255, 60, 70, 38)), (14, (255, 60, 70, 80)), (6, (255, 90, 100, 230)), (2, (255, 235, 235, 255))):
+        pygame.draw.line(glow, shade, source, target, wide)
+    for reach, shade in ((34, (255, 60, 70, 50)), (22, (255, 60, 70, 110)), (13, (255, 70, 80, 255)), (6, (255, 240, 240, 255))):
+        pygame.draw.circle(glow, shade, target, reach)
+    surface.blit(glow, (0, 0))
+
+
 def main():
     pygame.init()
     pygame.display.set_mode((1, 1))
@@ -74,8 +84,14 @@ def main():
     put(image, sprites.chest(62, 2.2, open_lid=True), (1200, 500))
     put(image, sprites.tim(19, 2.8), (800, 545))
 
+    # One pointer steers a canoe, the other traces a path.
+    laser(image, (-20, 330), (352, 300))
+    laser(image, (WIDTH + 20, 610), (902, 470))
+
     title = sprites.label("BEAVER BATTLES", 142, sprites.BLUE_BRIGHT, tilt=3)
-    put(image, title, (WIDTH // 2, 124))
+    put(image, title, (WIDTH // 2, 112))
+    tag = sprites.label("ON YOUR WHITEBOARD", 60, (255, 205, 70), tilt=3)
+    put(image, tag, (WIDTH // 2 + 150, 232))
 
     out = Path(__file__).resolve().parents[1] / "docs" / "thumbnail.png"
     pygame.image.save(image, out)
