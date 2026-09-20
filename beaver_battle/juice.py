@@ -283,20 +283,15 @@ class Juice:
         message, color, match = self.banner
         unit, age = self.scale, self.banner_age
         slam = 1 + 2.2 * max(0, 1 - age / .16) ** 2 + .1 * math.sin(min(1, age / .4) * math.pi) * (age < .4) + .025 * math.sin(age * 7) * (age >= .4)
-        # Set the name apart from the river: hush the board under a soft veil, then a full-strength
-        # sunburst in the two pastels furthest from the winner's own colour, so the letters never blend in.
+        # Set the name apart from the river: hush the board under a soft veil and put a cream plate,
+        # rimmed in the outline colour, behind the words.
         veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
         veil.fill((*sprites.INK, round(95 * min(1, age / .2))))
         surface.blit(veil, (0, 0))
-        warm = sorted((sprites.BUTTER, sprites.PEACH, sprites.PINK, sprites.MINT, sprites.LAVENDER_LIGHT),
-                      key=lambda other: -sum((a - b) ** 2 for a, b in zip(other, color)))[:2]
         middle, reach = pygame.Vector2(game.width / 2, game.height * .44), game.width * .4 * min(1, age / .25)
-        for ray in range(14):
-            start = age * .5 + ray * math.tau / 14
-            tips = [middle + pygame.Vector2(math.cos(start + bend), math.sin(start + bend) * .5) * reach for bend in (0, math.tau / 28)]
-            pygame.draw.polygon(surface, warm[ray % 2], [middle, *tips])
-            pygame.draw.polygon(surface, sprites.INK, [middle, *tips], max(1, round(2 * unit)))
-        pygame.draw.ellipse(surface, sprites.CREAM, pygame.Rect(middle.x - reach * .8, middle.y - reach * .31, reach * 1.6, reach * .69))
+        plate = pygame.Rect(middle.x - reach * .8, middle.y - reach * .31, reach * 1.6, reach * .69)
+        pygame.draw.ellipse(surface, sprites.INK, plate.inflate(12 * unit, 12 * unit))
+        pygame.draw.ellipse(surface, sprites.CREAM, plate)
         title = sprites.label(message, max(24, round(176 * unit)), color, tilt=-4)
         if abs(slam - 1) > .004:
             title = pygame.transform.rotozoom(title, 0, slam)
