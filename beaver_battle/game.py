@@ -930,6 +930,13 @@ class Game:
                     wish, rate = (math.atan2(along.y, along.x), math.radians(720)) if along.length() >= .05 else (player.heading, 0)
             player.heading = turn_toward(player.heading, wish, rate * dt)
             fire = control.fire and control.connected
+            special = control.special and control.connected
+            trigger = control.connected and (control.special_pressed or (special and not player.special_held))
+            control.special_pressed = False  # Consume a batched tap once across fixed physics steps.
+            player.special_held = special
+            had_powerup = bool(player.powerup)
+            if trigger and had_powerup:
+                self.activate(player)
             if player.state == "beaver":
                 target_speed = self.setting("beaver_boost_speed", 150) if fire else self.setting("beaver_speed", 75)
                 change = 300 * self.scale * dt
@@ -955,7 +962,7 @@ class Game:
             player.wall = blocked
             if player.knock.length_squared() > 4:
                 player.knock = self.move(player, player.knock, dt) * .0009 ** dt
-            if fire and player.state == "canoe" and player.cooldown == 0 and (player.ammo > 0 if each else player.reload == 0):
+            if trigger and not had_powerup and player.state == "canoe" and player.cooldown == 0 and (player.ammo > 0 if each else player.reload == 0):
                 self.shoot(player.player_id, player.pos, player.heading, player.radius)
                 player.ammo -= 1
                 player.cooldown = self.setting("shot_interval", .30)
@@ -969,10 +976,6 @@ class Game:
                     if other.state == "beaver" and other is not player and other.pos.distance_to(player.pos) <= player.radius + other.radius:
                         if self.hit(other, push=direction(player.heading), by=player.player_id):
                             self.sounds.append("ram")
-            special = control.special and control.connected
-            if special and not player.special_held:
-                self.activate(player)
-            player.special_held = special
             if player.joust:
                 end, target = self.trace(player.pos, player.pos + direction(player.heading) * 54 * self.scale,
                                          7 * self.scale, owner=player.player_id)

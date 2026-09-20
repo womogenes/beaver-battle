@@ -49,3 +49,8 @@ Coordinates are logical projector pixels, origin at top-left, x right and y down
   telemetry identification (see PROTOCOL.md); bidirectional Wi-Fi remains an explicit
   acknowledged mode. Optical acquisition still requires visible, separate dots and
   stable gate observations. A radio connection alone is not a tracking success.
+
+- Controller combat mapping: holding D14 illuminates/aims the laser and never
+  throws rocks. Each D27 press performs one action: use a held power-up, otherwise
+  throw one rock when ammunition/cooldown allow. Holding D27 does not repeat.
+  Fast packet-batched taps are consumed once across physics substeps.

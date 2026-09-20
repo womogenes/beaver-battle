@@ -121,7 +121,7 @@ def main():
     parser.add_argument('--game', choices=('battle', 'treasure', 'solo', 'dam'), help='go straight to one game instead of the chooser')
     parser.add_argument('--no-names', action='store_true', help='skip typing player names before a match')
     parser.add_argument('--mute', action='store_true', help='play no sound effects')
-    parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
+    parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left boosts swimmers, right fires or uses power-up')
     args = parser.parse_args()
     config = load_config(args.config)
     if args.players:
@@ -438,9 +438,9 @@ def main():
         screen.fill((224, 239, 241))
         text_line('HOW TO PLAY', 30, True)
         each = rules.get('reload_mode', 'each') == 'each'
-        steer = ['Move the mouse: your canoe steers toward it', 'Left click: throw a rock', 'Right click: use your power-up',
+        steer = ['Move the mouse: your canoe steers toward it', 'Left click: swimmer boost', 'Right click: use power-up or throw one rock',
                  'P or Esc: pause    R: new match    I: this page'] if args.simulate else [
-                 'Point your laser: your canoe steers toward the dot', 'Button 1: throw a rock', 'Button 2: use your power-up',
+                 'Point your laser: your canoe steers toward the dot', 'Hold button 1: aim the laser', 'Press button 2: use power-up or throw one rock',
                  'Hold both buttons for a second: pause']
         play = [f"You carry {rules['magazine']} rocks; " + (f"each comes back after {rules.get('reload_each', 1):g} s" if each else f"then wait {rules['reload_seconds']:g} s to reload"),
                 'The first hit knocks you into the water']

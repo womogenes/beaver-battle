@@ -55,18 +55,32 @@ heading = player.heading
 game.update(.1, {1: PlayerInput(1, aim=(float("nan"), 0))})
 assert abs(player.heading - heading) < 1e-6
 
-# A held trigger spends exactly three rounds, then blocks all new activations.
+# Laser hold never shoots; each second-button press gives one action, never autofire.
 game = arena((1,))
 control = {1: PlayerInput(1, fire=True)}
 game.update(0, control)
-game.update(config["game"]["shot_interval"], control)
-game.update(config["game"]["shot_interval"], control)
-assert game.players[1].ammo == 0 and game.players[1].reload > 2.4 and len(game.rocks) == 3
+game.update(.5, control)
+assert not game.rocks and game.players[1].ammo == 3
+control[1].special = True
+game.update(0, control)
+game.update(.35, control)
+assert len(game.rocks) == 1 and game.players[1].ammo == 2
+for shot in range(2):
+    game.update(config["game"]["shot_interval"] + .02, {})
+    game.update(0, {1: PlayerInput(1, special=True)})
+assert game.players[1].ammo == 0 and game.players[1].reload > 2.4
 game.players[1].powerup = "laser"
 game.update(1, {1: PlayerInput(1, fire=True, special=True)})
 assert game.players[1].ammo == 0 and game.players[1].powerup == "laser"
 game.update(1.6, {})
 assert game.players[1].reload == 0 and game.players[1].ammo == 3
+# A quick tap retained by the network is consumed just once, for either player.
+for player_id in (1, 2):
+    game = arena((player_id,))
+    tap = {player_id: PlayerInput(player_id, special_pressed=True)}
+    game.update(0, tap)
+    game.update(.4, tap)
+    assert len(game.rocks) == 1
 
 # One projectile cannot take both lives; feedback identifiers remain unique.
 game = arena()

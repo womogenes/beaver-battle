@@ -35,11 +35,15 @@ def run(game, seconds, inputs=None):
 # Rocks come back one at a time, and the canoe can fire again as soon as it has one.
 game = arena()
 game.players[2].pos.update(200, 650)
-hold = {1: PlayerInput(1, fire=True)}
-run(game, rules["shot_interval"] * 2 + .1, hold)
+hold = {1: PlayerInput(1, special=True)}
+for shot in range(3):
+    game.update(0, {})
+    game.update(0, hold)
+    if shot < 2: run(game, rules["shot_interval"] + .02)
 shooter = game.players[1]
 assert shooter.ammo == 0 and len(game.rocks) == 3
-run(game, rules["reload_each"] - rules["shot_interval"] * 2 + .05, hold)
+run(game, rules["reload_each"] - rules["shot_interval"] * 2 + .05)
+game.update(0, hold)
 assert len(game.rocks) >= 4, "a fourth rock should leave as soon as one has come back"
 run(game, rules["reload_each"] * 3 + .2)
 assert shooter.ammo == rules["magazine"] and shooter.reload == 0
@@ -106,7 +110,10 @@ assert game.phase == "match_over" and game.winner == 1
 # The old rules are still there behind the settings.
 game = arena(reload_mode="magazine", canoe_return=0, scoring="survivor", ram_swimmers=False)
 game.players[2].pos.update(200, 650)
-run(game, rules["shot_interval"] * 2 + .1, {1: PlayerInput(1, fire=True)})
+for shot in range(3):
+    game.update(0, {})
+    game.update(0, {1: PlayerInput(1, special=True)})
+    if shot < 2: run(game, rules["shot_interval"] + .02)
 assert game.players[1].reload > 2 and game.players[1].ammo == 0
 run(game, 1.5, {1: PlayerInput(1, fire=True)})
 assert len(game.rocks) <= 3, "the magazine rule locks the canoe out until the whole reload is done"
