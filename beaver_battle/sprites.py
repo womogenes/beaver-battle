@@ -593,3 +593,47 @@ def water(width, height, cell=.62, lighten=.8):
     wash.fill((255, 255, 255, round(255 * lighten)))
     surface.blit(wash, (0, 0))
     return surface
+
+
+def tiled_ground(name, width, height, tile_width, lighten=0.0):
+    """A wallpaper mirror-tiled across the board, optionally washed toward white."""
+    texture = art(name)
+    scale = tile_width / texture.get_width()
+    tile = pygame.transform.smoothscale(texture, (math.ceil(texture.get_width() * scale), math.ceil(texture.get_height() * scale)))
+    surface = pygame.Surface((width, height), 0, 24)
+    for column in range(math.ceil(width / tile.get_width())):
+        for row in range(math.ceil(height / tile.get_height())):
+            surface.blit(pygame.transform.flip(tile, column % 2 == 1, row % 2 == 1), (column * tile.get_width(), row * tile.get_height()))
+    if lighten:
+        wash = pygame.Surface((width, height), pygame.SRCALPHA)
+        wash.fill((255, 255, 255, round(255 * lighten)))
+        surface.blit(wash, (0, 0))
+    return surface
+
+
+CHEST_WOOD = (158, 110, 74)
+CHEST_DARK = (120, 80, 58)
+GOLD = (245, 206, 96)
+
+
+def chest(size, zoom=1, open_lid=False):
+    """The treasure chest: banded wood, a gold lock, and coins when it is open."""
+    pen = Pen(64, 60, size * zoom / 44, zoom)
+    if open_lid:
+        pen.poly(CHEST_DARK, [(-20, -8), (-17, -25), (17, -25), (20, -8)])
+        for x, y, r in ((-9, -9, 5), (0, -12, 6), (9, -9, 5), (-4, -5, 5), (5, -5, 5)):
+            pen.ellipse(GOLD, (x, y), r, width=1.4)
+        for x, y in ((-14, -20), (13, -22), (1, -27)):
+            pen.poly(WHITE, [(x, y - 4), (x + 1.2, y - 1.2), (x + 4, y), (x + 1.2, y + 1.2), (x, y + 4), (x - 1.2, y + 1.2), (x - 4, y), (x - 1.2, y - 1.2)], INK, 1)
+    else:
+        pen.poly(CHEST_WOOD, [(-21, -4), (-19, -16), (-11, -23), (11, -23), (19, -16), (21, -4)])
+        pen.line(CHEST_DARK, (-12, -22), (-12, -5), 1.4)
+        pen.line(CHEST_DARK, (12, -22), (12, -5), 1.4)
+    pen.poly(CHEST_WOOD, [(-21, -4), (21, -4), (19, 20), (-19, 20)])
+    for x in (-12, 12):
+        pen.poly(GOLD, [(x - 3, -4), (x + 3, -4), (x + 3, 20), (x - 3, 20)], INK, 1.4)
+    pen.line(CHEST_DARK, (-20, 8), (20, 8), 1.4)
+    pen.ellipse(GOLD, (0, 2), 5.5, 6.5, width=1.6)
+    pen.ellipse(CHEST_DARK, (0, 2.5), 1.6, 2.4, outline=None)
+    pen.stroke([(-21, -4), (21, -4)], INK, 2, closed=False)
+    return pen.image()

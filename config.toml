@@ -94,3 +94,18 @@ enabled = true
 volume = 0.42
 music = true
 music_volume = 0.75 # The theme sits under the effects; build it with checks/build_music.py.
+
+[treasure]
+draw_seconds = 30 # Each player's time to draw a route to the chest.
+merge_gap = 34 # Breaks in a drawn line up to this wide, in logical pixels, are joined; wider ones lose.
+check_seconds = 2.6 # How long the judged routes are shown before the race.
+walk_speed = 24.0 # Pixels per second on grass; tuned so a race lasts about half a minute.
+swim_speed = 12.0 # Pixels per second in a pond.
+boost_factor = 2.2
+boost_seconds = 1.5
+boost_cooldown = 6.0
+trace_width = 46 # How close to the line the laser must point.
+trace_reach = 150 # How far ahead of the beaver the laser may lead it.
+run_limit = 75 # Seconds before the closest beaver is given the win.
+bot_draw_seconds = 5
+seed = 7

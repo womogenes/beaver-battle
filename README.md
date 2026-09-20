@@ -20,6 +20,12 @@ For a reproducible check without opening a window:
 uv run python -m beaver_battle --headless --seconds 60 --screenshot /tmp/beaver-battle.png --report /tmp/beaver-battle.json
 ```
 
+## Two games
+
+The launcher opens on a chooser: **Beaver Battle** (the canoe fight described here) or **Treasure Dash**. `--game battle` or `--game treasure` skips the chooser, and both menus have a Change game button.
+
+**Treasure Dash** is for two players. A chest sits in the middle of a meadow of rocks and ponds. Each player has 30 seconds to draw a path from their corner to the chest: with a marker on the whiteboard, read by the same camera mask as Beaver Battle's walls, or with the cursor in simulation (hold the left button; right click when done). Breaks up to `merge_gap` pixels are joined; a path that never reaches the chest loses on the spot. Then the race: a beaver only walks while its player's laser traces the line just ahead of it, a rock on the line stops it there for good, ponds are crossed at half speed by swimming, and button 2 gives a short speed boost on a cooldown. First to the chest wins. There are eight boards, each mirrored so both players face the same puzzle, and a race is tuned to last about half a minute. In simulation player 2 is a bot that draws and traces its own path, since there is one mouse. Settings live under `[treasure]` in `config.toml`; `checks/check_treasure.py` covers the rules. Only the simulated, cursor-drawn game has been played; drawing with real markers under the camera is untested.
+
 ## Connect the physical game
 
 1. Connect the laptop to the HY300PRO HDMI input and select that input on the projector. In desktop display settings, enable the projector as an extended display. Run `uv run python -m beaver_battle --list-displays`, then `uv run python -m beaver_battle --display 1 --fullscreen --display-test` (replace `1` with the projector index). See [HDMI setup](docs/projector.md).

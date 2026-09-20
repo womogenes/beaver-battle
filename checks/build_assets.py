@@ -51,6 +51,8 @@ def lily_pad():
 
 def textures():
     cv2.imwrite(str(ROOT / "bark.png"), lift(cv2.imread(str(ROOT / "source/bark.webp")), 62))
+    grass = cv2.imread(str(ROOT / "source/grass.png"))
+    cv2.imwrite(str(ROOT / "grass.jpg"), grass[10:-10, 10:-10], [cv2.IMWRITE_JPEG_QUALITY, 90])
     cv2.imwrite(str(ROOT / "water.jpg"), cv2.imread(str(ROOT / "source/water.webp")), [cv2.IMWRITE_JPEG_QUALITY, 90])
 
 
