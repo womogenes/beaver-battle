@@ -55,6 +55,8 @@ def textures():
     # matter if the camera takes its darkest cracks for ink.
     cv2.imwrite(str(ROOT / "bark_rich.jpg"), lift(cv2.imread(str(ROOT / "source/bark.webp")), 34), [cv2.IMWRITE_JPEG_QUALITY, 92])
     cv2.imwrite(str(ROOT / "grass.jpg"), cv2.imread(str(ROOT / "source/meadow.webp")), [cv2.IMWRITE_JPEG_QUALITY, 92])
+    blades = cv2.imread(str(ROOT / "source/grass_blades.png"))
+    cv2.imwrite(str(ROOT / "grass_blades.jpg"), blades[10:-10, 10:-10], [cv2.IMWRITE_JPEG_QUALITY, 90])
     cv2.imwrite(str(ROOT / "cobble.jpg"), lift(cv2.imread(str(ROOT / "source/cobble.webp")), 40), [cv2.IMWRITE_JPEG_QUALITY, 90])
     cv2.imwrite(str(ROOT / "water.jpg"), cv2.imread(str(ROOT / "source/water.webp")), [cv2.IMWRITE_JPEG_QUALITY, 90])
 

@@ -6,6 +6,7 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pygame
 
@@ -60,6 +61,8 @@ for index, board in enumerate(BOARDS):
         assert blocked or wet > .08, f'{board["name"]}: the straight line is free, so there is nothing to solve'
     assert game.rock_at(game.chest, 45) is None and not game.in_water(game.chest), board["name"]
     assert np.array_equal(game.water, game.water[:, ::-1]), board["name"]
+    ponds = cv2.connectedComponents(game.water.astype(np.uint8))[0] - 1
+    assert 1 <= ponds <= 3, f'{board["name"]}: {ponds} ponds; two or three is the limit for a duel board'
 
 # A small break in the ink is joined up; a big one leaves the chest out of reach and marks where the ink ran out.
 game = fresh(0)
@@ -136,14 +139,14 @@ assert 5 < sum(times) / len(times) < 16, times
 
 # A duel's scatter of trees, logs and boost tokens is mirrored, never seals anyone in, and changes from match to match;
 # a one-player board is dressed the same way every time, so today's times are comparable.
-game = fresh(6, dressed=True)
+game = fresh(3, dressed=True)
 assert game.trees and game.logs and game.boosts and game.deer and game.portals
 for things in (game.trees, [(first, half) for first, second, half in game.logs], [(place, alive) for place, alive in game.boosts]):
     spots = sorted((round(place.x), round(place.y)) for place, extra in things)
     assert spots == sorted((game.width - x, y) for x, y in spots), "a duel's fixed scatter must be mirrored"
 assert game.passable()
-again = fresh(6, dressed=True)
-again.new_match((1, 2), (), 6)
+again = fresh(3, dressed=True)
+again.new_match((1, 2), (), 3)
 assert [tuple(place) for place, size in again.trees] != [tuple(place) for place, size in game.trees]
 first, second = Treasure(config), Treasure(config)
 for solo_game in (first, second, second):

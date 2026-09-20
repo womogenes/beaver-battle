@@ -19,25 +19,27 @@ from beaver_battle import sprites
 # Rocks are (x, y, radius) and ponds and islands (x, y, rx, ry), all as fractions of the board width
 # (radii) or of width and height (positions). An island is land cut back out of the ponds.
 BOARDS = [
+    # Two or three ponds to a board, no more: a mirrored pair, and sometimes one in the middle. Ponds are drawn at
+    # their written size; only the rocks are shrunk and scattered.
     {"name": "TWIN LAKES", "rocks": [(.30, .53, .042), (.30, .40, .034), (.30, .66, .034), (.41, .31, .028), (.41, .75, .028)],
-     "ponds": [(.27, .25, .12, .15), (.27, .81, .12, .15), (.20, .53, .05, .14)]},
+     "ponds": [(.24, .30, .10, .17)]},
     {"name": "THE MOAT", "rocks": [(.31, .40, .034), (.31, .66, .034), (.21, .53, .036), (.40, .22, .028), (.40, .84, .028)],
-     "ponds": [(.5, .53, .19, .30)], "islands": [(.5, .53, .085, .14)]},
+     "ponds": [(.5, .53, .15, .24)], "islands": [(.5, .53, .075, .125)]},
     {"name": "ROCK GARDEN", "rocks": [(.20, .30, .03), (.20, .53, .03), (.20, .76, .03), (.29, .41, .03), (.29, .65, .03),
-                                      (.38, .30, .03), (.38, .53, .034), (.38, .76, .03), (.445, .42, .024), (.445, .64, .024)],
-     "ponds": [(.12, .22, .06, .10), (.12, .84, .06, .10), (.29, .20, .05, .07), (.29, .86, .05, .07), (.29, .53, .05, .13), (.44, .53, .04, .10)]},
+                                      (.38, .30, .03), (.38, .76, .03), (.445, .42, .024), (.445, .64, .024)],
+     "ponds": [(.37, .53, .045, .13)]},
     {"name": "THE RIVER", "rocks": [(.24, .17, .026), (.36, .88, .026), (.42, .45, .028), (.42, .61, .028), (.17, .53, .03)],
-     "ponds": [(.30, .16, .022, .12), (.30, .36, .06, .14), (.30, .56, .075, .14), (.30, .76, .06, .14), (.30, .93, .022, .08)],
+     "ponds": [(.30, .15, .03, .12), (.30, .34, .045, .13), (.30, .54, .055, .14), (.30, .74, .045, .13), (.30, .92, .03, .10)],
      "portals": [((.19, .86), (.41, .84))]},
     {"name": "HORSESHOE", "rocks": [(.5 - .125 * math.cos(math.radians(a)), .53 + .222 * math.sin(math.radians(a)), .03) for a in (-52, -26, 0, 26, 52)]
      + [(.24, .30, .03), (.24, .76, .03)],
-     "ponds": [(.5, .22, .10, .12), (.5, .84, .10, .12), (.30, .50, .05, .15), (.43, .30, .05, .08), (.43, .76, .05, .08)]},
-    {"name": "STEPPING STONES", "rocks": [(.25, .67, .028), (.38, .37, .028), (.155, .53, .026), (.45, .66, .024)],
-     "ponds": [(.25, .33, .085, .24), (.38, .75, .085, .24), (.12, .86, .06, .10)]},
+     "ponds": [(.5, .20, .10, .10), (.5, .86, .10, .10)]},
+    {"name": "STEPPING STONES", "rocks": [(.25, .74, .028), (.38, .37, .028), (.155, .53, .026), (.45, .66, .024)],
+     "ponds": [(.27, .42, .075, .22)]},
     {"name": "BOULDER WALL", "rocks": [(.26, y, .03) for y in (.19, .42, .53, .64, .75, .86)] + [(.40, y, .028) for y in (.20, .31, .42, .53, .64, .86)],
-     "ponds": [(.32, .31, .05, .09), (.455, .75, .045, .09)], "portals": [((.16, .22), (.445, .25))]},
+     "ponds": [(.33, .31, .055, .10)], "portals": [((.16, .22), (.445, .25))]},
     {"name": "THE MARSH", "rocks": [(.23, .53, .03), (.34, .36, .028), (.34, .70, .028), (.43, .53, .026)],
-     "ponds": [(.17, .34, .06, .10), (.17, .72, .06, .10), (.28, .53, .04, .10), (.39, .20, .06, .09), (.39, .86, .06, .09), (.44, .40, .03, .06), (.44, .66, .03, .06)]},
+     "ponds": [(.29, .53, .05, .14), (.5, .18, .12, .09)]},
 ]
 
 # One player crosses the whole board, so these need not be symmetric: written edge to edge, never mirrored.
@@ -79,13 +81,7 @@ def scattered(board, shrink):
         if clear(x + side, y + lift, r * shrink):
             rocks.append((x + side, y + lift, r * shrink * .8))
     for index, (x, y, rx, ry) in enumerate(board.get("ponds", [])):
-        if whole:
-            ponds.append((x, y, rx, ry))  # One player's water is one broad body: full size, and no stray puddles.
-            continue
-        ponds.append((x, y, rx * shrink, ry * shrink))
-        side, lift = (-.062 if index % 2 else .062), (-.13 if index % 2 else .13)
-        if clear(x + side, y + lift, max(rx, ry * 9 / 16) * shrink):
-            ponds.append((x + side, y + lift, rx * shrink * .7, ry * shrink * .7))
+        ponds.append((x, y, rx, ry))  # Water is drawn at its written size, with no stray puddles scattered round it.
     islands = [(x, y, rx * shrink, ry * shrink) for x, y, rx, ry in board.get("islands", [])]
     return rocks, ponds, islands
 
@@ -718,21 +714,32 @@ class Treasure:
         surface = sprites.tiled_ground("grass.jpg", self.width, self.height, self.width, lighten=self.setting("grass_wash", .35))
         pond = sprites.tiled_ground("water.jpg", self.width, self.height, round(620 * unit), lighten=.18)
         mask = self.water.astype(np.uint8) * 255
-        # Every pond and river is edged with a wall of cobblestones, outlined where it meets the grass and the water.
-        reach = round(40 * unit) | 1
+        # A thin bank of long grass round every pond and river, and the water inside it.
+        reach = round(14 * unit) | 1
         bank = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (reach, reach)))
-        stones = sprites.tiled_ground("cobble.jpg", self.width, self.height, round(230 * unit))
-        for layer, alpha in ((stones, bank), (pond, mask)):
+        blades = sprites.tiled_ground("grass_blades.jpg", self.width, self.height, round(150 * unit))
+        for layer, alpha in ((blades, bank), (pond, mask)):
             sheet = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
             sheet.blit(layer, (0, 0))
             pixels = pygame.surfarray.pixels_alpha(sheet)
             pixels[:] = cv2.GaussianBlur(alpha, (5, 5), 0).T
             del pixels
             surface.blit(sheet, (0, 0))
-            edges = cv2.findContours(alpha, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)[0]
-            for edge in edges:
-                if len(edge) > 2:
-                    pygame.draw.lines(surface, sprites.STONE_DARK, True, edge.reshape(-1, 2).tolist(), max(2, round(3 * unit)))
+        # Lily pads float on the bigger ponds, well clear of the banks. They are only there to look at.
+        rng = random.Random(self.board_index * 13 + 5)
+        depth = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+        count, bodies = cv2.connectedComponents(mask)
+        for body in range(1, count):
+            deep = np.argwhere((bodies == body) & (depth > 30 * unit))
+            if (bodies == body).sum() < 26000 * unit ** 2 or not len(deep):
+                continue
+            placed = []
+            for attempt in range(60):
+                y, x = deep[rng.randrange(len(deep))]
+                if all(math.hypot(x - px, y - py) > 58 * unit for px, py in placed) and len(placed) < 2 + (bodies == body).sum() // (42000 * unit ** 2):
+                    placed.append((x, y))
+                    pad = sprites.lily_pad(rng.uniform(15, 21) * unit, degrees=rng.uniform(0, 360), flower=rng.random() < .45)
+                    surface.blit(pad, pad.get_rect(center=(int(x), int(y))))
         for first, second, half in self.logs:
             along = second - first
             image = sprites.stick(round(along.length() / unit), round(2 * half / unit), unit, seed=round(first.x + first.y))
