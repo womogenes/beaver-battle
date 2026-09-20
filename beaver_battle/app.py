@@ -238,7 +238,13 @@ def main():
             return 'game', ''
         return 'lobby', ''
     ids = list(range(1, config['game']['players'] + 1))
-    walls = simulated_walls(width, height) if args.simulate else None
+    # --simulate (and headless runs) never touch the hardware. Without it the camera and the controller
+    # listener start as usual, and each frame is driven by lasers if any controller is connected or by
+    # the mouse and keyboard if none is. From here on args.simulate means "this frame is mouse-driven".
+    forced = args.simulate
+    practice_walls = simulated_walls(width, height)
+    walls = practice_walls if forced else None
+    laser_at = None
     snapshot = VisionSnapshot()
     elapsed = 0.0
     frame_count = 0
@@ -433,7 +439,7 @@ def main():
         screen.blit(image, image.get_rect(center=(width // 2, 700)))
 
     try:
-        if not args.simulate:
+        if not forced:
             if not args.bench:
                 bridge.start()
             vision.start()
@@ -594,12 +600,13 @@ def main():
                         key_cycle = True
                     elif event.key == pygame.K_F2:
                         preview = not preview
-                    elif event.key == pygame.K_c and not args.simulate:
+                    elif event.key == pygame.K_c and not forced:
                         mode = 'calibration'
                         vision.begin_calibration()
                     elif event.key == pygame.K_r and args.simulate and mode in ('game', 'treasure', 'pause'):
                         mode, menu_message = start_chosen()
-            if args.simulate:
+            laser_at = None
+            if forced:
                 mouse = pygame.mouse.get_pos() if args.mouse else None
                 pressed = pygame.mouse.get_pressed(3)
                 if pause_button.union(info_button).collidepoint(pygame.mouse.get_pos()):
@@ -619,6 +626,24 @@ def main():
                 active_ids = bridge.active_ids(now)
                 scheduler.update(now, bridge, vision, mode not in ('calibration', 'pause'))
                 bridge.send(now)
+                args.simulate = not active_ids
+                if args.simulate:
+                    # No laser controller is connected: the mouse steers player 1 and the keyboard works the
+                    # menus, exactly as under --simulate, with practice walls if the camera has none to offer.
+                    pressed = pygame.mouse.get_pressed(3)
+                    if pause_button.union(info_button).collidepoint(pygame.mouse.get_pos()):
+                        pressed = (False, False, False)
+                    inputs = simulated_inputs(config, elapsed, pygame.mouse.get_pos(), (pressed[0], pressed[2]), ids)
+                    active_ids = ids
+                    walls = walls if snapshot.calibrated and walls is not None else practice_walls
+                else:
+                    # Lasers are connected: the lowest controller's dot stands in for the trackpad. It
+                    # hovers over buttons through the same path as the mouse; making a controller button
+                    # count as a click is one more posted event here.
+                    pointer = inputs.get(min(active_ids))
+                    if pointer is not None and pointer.aim is not None and mode in ('home', 'players', 'lobby', 'pause', 'scores', 'info'):
+                        laser_at = (round(pointer.aim[0]), round(pointer.aim[1]))
+                        pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=laser_at, rel=(0, 0), buttons=(0, 0, 0)))
             host = min(active_ids, default=1)
             host_input = inputs.get(host, PlayerInput(host, connected=False))
             old_fire, old_special = previous.get(host, (False, False))
@@ -658,7 +683,7 @@ def main():
                     if choice == 'Quit':
                         running = False
                     elif choice == 'Calibrate board':
-                        if args.simulate:
+                        if forced:
                             menu_message = 'Calibration uses the real USB camera.'
                         else:
                             mode = 'calibration'
@@ -859,17 +884,22 @@ def main():
                         screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
                 text_line(menu_message or status or ('Type a name, then Enter.  Enter alone keeps the one shown.' if mode == 'names' else
                                                      'Hold both buttons to cancel' if mode == 'ready' else ('Click a button, or press Down then Enter' if args.simulate else 'Click, or button 1 to choose and button 2 to confirm')), height - 100)
-                camera_status = 'simulated' if args.simulate else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
-                text_line(f'Connected: {active_ids}    Camera: {camera_status}', height - 55)
+                camera_status = 'simulated' if forced else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
+                lasers = 'no lasers connected: using mouse and keyboard' if args.simulate and not forced else f'Connected: {active_ids}'
+                text_line(f'{lasers}    Camera: {camera_status}', height - 55)
             if preview and mode in ('lobby', 'pause') and snapshot.preview is not None:
                 import cv2
                 image = cv2.cvtColor(snapshot.preview, cv2.COLOR_BGR2RGB)
                 image = pygame.surfarray.make_surface(np.transpose(image, (1, 0, 2)))
                 screen.blit(pygame.transform.smoothscale(image, (width // 4, height // 4)), (width * 3 // 4, 0))
+            if laser_at is not None:
+                # Where the game thinks the laser is, so a player can see it track their dot.
+                pygame.draw.circle(screen, sprites.BLUE, laser_at, 16, 4)
+                pygame.draw.circle(screen, sprites.WHITE, laser_at, 11, 3)
             pygame.display.flip()
             # Vision needs what we just projected to tell a shadow from dark artwork.
             # Reading the framebuffer costs real time, so only at the wall update rate.
-            if not args.simulate and mode in ('game', 'countdown') and now >= projection_due:
+            if not forced and mode in ('game', 'countdown') and now >= projection_due:
                 projection_due = now + 1 / max(1.0, float(config['camera'].get('wall_update_hz', 10)))
                 vision.set_projection(np.transpose(pygame.surfarray.array3d(screen), (1, 0, 2)), now)
             previous = {player_id: (value.fire, value.special) for player_id, value in inputs.items()}
@@ -879,7 +909,7 @@ def main():
             args.screenshot.parent.mkdir(parents=True, exist_ok=True)
             pygame.image.save(screen, str(args.screenshot))
         report = dict(frames=frame_count, simulation_seconds=round(elapsed, 3), mode=mode, phase=game.phase,
-                      scores=game.scores, feedback_events=feedback_count, simulated=args.simulate,
+                      scores=game.scores, feedback_events=feedback_count, simulated=bool(args.simulate),
                       projector=config['projector'], display_index=display_index,
                       camera_calibrated=bool(snapshot.calibrated),
                       camera_frame_available=snapshot.preview is not None)
@@ -889,6 +919,6 @@ def main():
         print(json.dumps(report))
     finally:
         bridge.stop()
-        if not args.simulate:
+        if not forced:
             vision.stop()
         pygame.quit()

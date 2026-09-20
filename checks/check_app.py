@@ -38,6 +38,7 @@ class Scenario:
     checkpoint: int = 0
     game: object = None
     vision: object = None
+    posted: list = field(default_factory=list)
 
     def tick(self, fps):
         self.now += .1
@@ -83,6 +84,7 @@ class Scenario:
             for target, name, value in (
                 (pygame.time, 'Clock', lambda: SimpleNamespace(tick=self.tick)),
                 (pygame.event, 'get', self.events), (pygame.display, 'flip', self.flip),
+                (pygame.event, 'post', self.posted.append),
                 (app.time, 'monotonic', lambda: self.now),
                 (app, 'ControllerBridge', lambda config: bridge),
                 (app, 'IdentityScheduler', lambda config: Mock()),
@@ -147,6 +149,22 @@ def unhealthy_resume(run, state):
         run.done = True
 
 
+def no_lasers(run, state):
+    """With no controller connected and no camera, the mouse and keyboard run a whole match."""
+    mode = state['mode']
+    if run.stage == 0 and mode == 'lobby':
+        run.stage = 1
+        return [key(pygame.K_RETURN)]
+    if run.stage == 1 and mode == 'game' and run.game.update.call_count >= 3:
+        run.done = True
+
+
+def laser_pointer(run, state):
+    """With a controller connected, its laser dot hovers the menu in place of the trackpad."""
+    if state['mode'] == 'lobby' and run.frames >= 3:
+        run.done = True
+
+
 def calibration_cancel(run, state):
     if run.stage == 0:
         run.stage = 1
@@ -177,6 +195,7 @@ def bench_autostart(run, state):
 
 
 def main():
+    pygame_mouse_at = (0, 0)  # Where the dummy video driver reports the mouse.
     result = Scenario(lifecycle).run()
     assert [mode for mode, elapsed in result.history] == [
         'ready', 'countdown', 'game', 'pause', 'lobby',
@@ -190,6 +209,20 @@ def main():
     for method in ('keyboard', 'controller'):
         Scenario(calibration_cancel, method).run()
 
+    fallback = Scenario(no_lasers, active=[], calibrated=False)
+    fallback.run()
+    assert [mode for mode, elapsed in fallback.history][-3:] == ['ready', 'countdown', 'game'], fallback.history
+    step, inputs, walls = fallback.game.update.call_args.args
+    assert set(inputs) == {1, 2} and inputs[1].connected and inputs[1].aim == pygame_mouse_at, 'player 1 follows the mouse'
+    assert walls is not None and walls.dtype == bool and walls.any(), 'practice walls stand in for the camera'
+    fallback.bridge.start.assert_called_once()
+    fallback.bridge.feedback.assert_not_called()
+    assert not fallback.posted, 'no laser, so nothing pretends to be one'
+
+    pointed = Scenario(laser_pointer).run()
+    hovers = [event.pos for event in pointed.posted if event.type == pygame.MOUSEMOTION]
+    assert hovers and set(hovers) == {(640, 360)}, 'the lowest controller\'s dot hovers the menu'
+
     bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '3'], active=[])
     bench.run()
     modes = [mode for mode, elapsed in bench.history]
@@ -198,7 +231,8 @@ def main():
     bench.vision.start.assert_called_once()
     assert bench.game.new_match.call_count == 2, 'One startup match plus one built from the board scan'
     assert bench.game.update.call_count > 0, 'Bench must reach live physics without controllers'
-    print('App lifecycle, guarded resume, calibration cancellation, bench autostart, and cleanup checks passed.')
+    print('App lifecycle, guarded resume, calibration cancellation, mouse fallback without lasers, laser as pointer, '
+          'bench autostart, and cleanup checks passed.')
 
 
 if __name__ == '__main__':

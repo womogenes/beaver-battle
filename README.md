@@ -6,6 +6,8 @@ A projection-mapped canoe battle for two or three red-laser controllers. Python 
 
 ## Run now, without hardware
 
+Plain `uv run python -m beaver_battle` works with or without the hardware: it listens for the laser controllers, and while none is connected the mouse steers player 1, the keyboard works the menus, and bots fill the other canoes; as soon as a controller connects, the lasers take over, and the lowest controller's dot hovers the menus in place of the trackpad. `--simulate` does the same without ever opening the camera or the network port.
+
 Install Python 3.12 and [uv](https://docs.astral.sh/uv/), then run from the repository root:
 
 ```sh
