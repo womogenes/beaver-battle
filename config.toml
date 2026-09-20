@@ -57,7 +57,13 @@ beaver_speed = 75.0
 beaver_boost_speed = 150.0
 shot_interval = 0.30
 magazine = 3
-reload_seconds = 2.5
+reload_seconds = 2.5 # Whole-magazine lockout, used only when reload_mode = "magazine".
+reload_mode = "each" # Astro Party: rocks come back one at a time. "magazine" is the old overheat rule.
+reload_each = 1.0 # Seconds for one rock to come back.
+canoe_return = 7.0 # A beaver that survives this long in the water gets a new canoe; 0 means never.
+return_invulnerability = 1.5 # Grace after the new canoe arrives, so it cannot be sunk on the spot.
+ram_swimmers = true # A canoe running over a swimming beaver sinks it.
+scoring = "kills" # A point to whoever sinks a beaver. "survivor" gives the last one afloat the point.
 rock_speed = 650.0
 rock_lifetime = 2.0
 invulnerability = 0.8
@@ -73,9 +79,66 @@ shape_gap = 5 # Smallest gap-bridging radius tried when looking for enclosures.
 shape_min_area = 1200 # An arena below about a canoe's size is not worth filling.
 shape_closure = 0.70 # A gap may be this fraction of a shape's extent and still close it.
 shape_max_fraction = 0.25
-round_delay = 3.0
+round_delay = 2.2
+water_wash = 0.8 # How far the water backdrop is washed toward white: 1 is a plain white board, 0 is full colour.
+hit_stop = 0.09
+knockback = 560.0
 seed = 2026
 
 [feedback]
 enabled = true
 duration_ms = 200
+
+[sound]
+enabled = true
+volume = 0.42
+music = true
+music_volume = 0.75 # The theme sits under the effects; build it with checks/build_music.py.
+
+[treasure]
+draw_seconds = 30 # Each player's time to draw a route to the chest.
+merge_gap = 34 # Breaks in a drawn line up to this wide, in logical pixels, are joined; wider ones lose.
+check_seconds = 2.6 # How long the judged routes are shown before the race.
+walk_speed = 68.0 # Pixels per second on grass; tuned so a race lasts about ten seconds.
+swim_speed = 48.0 # Pixels per second in a pond: 70% of walking, so a short swim can beat a long detour.
+boost_factor = 2.2
+boost_seconds = 0.8
+boost_cooldown = 3.5
+trace_width = 40 # How close to the line the laser must point.
+trace_reach = 150 # How far ahead of the beaver the laser may lead it.
+run_limit = 75 # Seconds before the closest beaver is given the win.
+solo_pace = 1.6 # Solo crosses the whole board, so the beaver is this much brisker.
+solo_run_limit = 150
+leaderboard_file = "leaderboard.json" # Today's best solo times; ignored by git.
+bot_draw_seconds = 5
+trees = 3 # Scattered per half of a duel board (doubled on a one-player board); a board may override.
+logs = 2
+boost_clusters = 2 # Sprigs of berries per half of a duel board (doubled on a one-player map).
+berries_per_cluster = 1
+berry_color = "red" # "blue" if red berries confuse the camera's laser tracking on the real board.
+grass_wash = 0.35 # How far the meadow is washed toward white: 0 is the image as drawn.
+token_boost = 1.2 # Seconds of boost from one token.
+deer = 2 # They run where they like and block a beaver only while they stand in its way.
+deer_speed = 80.0
+deer_stall = 2.0 # Seconds a beaver is winded after running into a deer.
+deer_grace = 1.2 # Then this long to push past before a deer can wind it again.
+object_scale = 0.62 # Rocks and ponds are this fraction of their authored size, each with a smaller sibling.
+seed = 7
+
+[dam]
+build_seconds = 30 # The builder's time to draw.
+attack_seconds = 22 # The attacker's time to flood the lodge; tuned by checks/check_dam.py so neither role is favoured.
+strength = 270 # Bites in the whole dam, shared over its wood by area: more wood means weaker pieces.
+section = 40 # A dam breaks in pieces about this long, in logical pixels.
+stroke = 10 # Drawn thickness of wood.
+max_wood = 2600 # The most wood a builder may draw, as a length of stroke.
+merge_gap = 14 # Gaps in the drawing up to this wide are sealed; wider ones leak.
+lodge_clearance = 105 # No wood this close to the lodge.
+lodge_ring = 70 # The lodge is flooded when this much of the ground within the ring is under water:
+flood_goal = 0.5
+flow_speed = 120.0 # How fast water advances through a breach, in pixels per second.
+rise_speed = 1400.0 # The river filling the valley before the attack; only for show, unless the dam leaks.
+rise_seconds = 2.5
+beaver_speed = 200.0
+bite_seconds = 0.3 # The quickest a beaver can bite; holding the button bites at this rate.
+bite_reach = 34

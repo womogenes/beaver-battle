@@ -49,6 +49,8 @@ STONE_DARK = (146, 153, 188)
 WATER_TOP = (208, 239, 240)
 WATER_BOTTOM = (180, 223, 240)
 WHITE = (255, 255, 255)
+BLUE = (44, 78, 178)  # Reading text: dark, saturated and un-red, so it survives a washed-out projector.
+BLUE_BRIGHT = (78, 138, 228)
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 art_cache = {}
@@ -66,6 +68,115 @@ def art(name):
         image = pygame.image.load(ASSETS / name)
         art_cache[name] = image.convert_alpha() if pygame.display.get_surface() else image
     return art_cache[name]
+
+
+def typeface(size):
+    """Lilita One, the chunky display face; pygame's default if the file is missing."""
+    key = ("typeface", size)
+    if key not in art_cache:
+        if not pygame.font.get_init():
+            pygame.font.init()
+        path = ASSETS / "fonts" / "LilitaOne-Regular.ttf"
+        art_cache[key] = pygame.font.Font(path if path.is_file() else None, size)
+    return art_cache[key]
+
+
+def lettering(message, size, color, spacing=0):
+    """Plain text in the display face, surviving a pygame restart since the font was opened.
+
+    spacing opens the letters up, which heavily outlined text needs or its outlines run together.
+    """
+    try:
+        font = typeface(size)
+        font.size("A")
+    except pygame.error:
+        del art_cache[("typeface", size)]
+        font = typeface(size)
+    if not spacing or len(message) < 2:
+        return font.render(message, True, color)
+    glyphs = [font.render(letter, True, color) for letter in message]
+    image = pygame.Surface((sum(glyph.get_width() for glyph in glyphs) + spacing * (len(glyphs) - 1), font.get_height()), pygame.SRCALPHA)
+    x = 0
+    for glyph in glyphs:
+        image.blit(glyph, (x, 0))
+        x += glyph.get_width() + spacing
+    return image
+
+
+def sign(message, size, color=BLUE):
+    """Reading text for a projector: solid dark-blue letters inside a white halo.
+
+    On a whiteboard dark-on-light is what survives room light; pale fills and thin outlines wash out.
+    """
+    key = ("sign", message, size, color)
+    if key not in art_cache:
+        if sum(1 for name in art_cache if name[0] == "sign") > 300:
+            for name in [name for name in art_cache if name[0] == "sign"]:
+                del art_cache[name]
+        spacing, reach = round(size * .03), max(2, round(size * .09))
+        face, glow = lettering(message, size, color, spacing), lettering(message, size, WHITE, spacing)
+        image = pygame.Surface((face.get_width() + 2 * reach, face.get_height() + 2 * reach), pygame.SRCALPHA)
+        for inner in range(reach, 0, -2):
+            for step in range(20):
+                image.blit(glow, (reach + inner * math.cos(step * math.tau / 20), reach + inner * math.sin(step * math.tau / 20)))
+        image.blit(face, (reach, reach))
+        art_cache[key] = image
+    return art_cache[key]
+
+
+def label(message, size, fill=WHITE, ink=INK, tilt=0):
+    """Sticker lettering: glossy two-tone letters, a white rim, a fat outline and a solid block of shadow.
+
+    The fill must be a pastel: black outlines would read as walls and red letters as laser dots.
+    """
+    key = ("label", message, size, fill, ink, tilt)
+    if key not in art_cache:
+        if sum(1 for name in art_cache if name[0] == "label") > 300:
+            for name in [name for name in art_cache if name[0] == "label"]:
+                del art_cache[name]
+        big, spacing = size >= 30, 0
+        if fill == WHITE:
+            # White letters have no colour of their own to stand on, so they get the most line work:
+            # a heavy outline, a white halo beyond it, and a fine outer line to close the halo off.
+            heavy, halo, fine = max(2, round(size * .12)), max(1, round(size * .06)), max(1, round(size * .035))
+            rings = [(ink, heavy + halo + fine), (WHITE, heavy + halo), (ink, heavy)] if size >= 24 else [(ink, heavy + 1)]
+            spacing = round(size * .07)
+        else:
+            rim = max(2, round(size * .045)) if big else 0
+            rings = [(ink, rim + max(2, round(size * .085)))] + ([(WHITE, rim)] if rim else [])
+        edge, drop = rings[0][1], max(2, round(size * (.16 if big else .12)))
+        face, shine = lettering(message, size, fill, spacing), lettering(message, size, tint(fill, .5), spacing)
+
+        def ringed(color, reach):
+            source = lettering(message, size, color, spacing)
+            ring = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
+            steps = max(28, round(reach * 6))
+            for step in range(steps):
+                ring.blit(source, (edge + reach * math.cos(step * math.tau / steps), edge + reach * math.sin(step * math.tau / steps)))
+            if reach > 3:
+                # Fill the band between the letter and its outermost echo, so thick outlines stay solid.
+                for inner in range(3, round(reach), 3):
+                    for step in range(steps):
+                        ring.blit(source, (edge + inner * math.cos(step * math.tau / steps), edge + inner * math.sin(step * math.tau / steps)))
+            return ring
+
+        outline = ringed(*rings[0])
+        image = pygame.Surface((outline.get_width(), outline.get_height() + drop), pygame.SRCALPHA)
+        for fall in range(drop + 1):
+            image.blit(outline, (0, fall))
+        for color, reach in rings[1:]:
+            image.blit(ringed(color, reach), (0, 0))
+        image.blit(face, (edge, edge))
+        if big and fill != WHITE:
+            # A lighter upper half, cut on a gentle slant, reads as gloss.
+            gloss = shine.copy()
+            cut = pygame.Surface(gloss.get_size(), pygame.SRCALPHA)
+            height = gloss.get_height()
+            pygame.draw.polygon(cut, (255, 255, 255, 255), [(0, 0), (gloss.get_width(), 0), (gloss.get_width(), height * .46), (0, height * .58)])
+            gloss.blit(cut, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            image.blit(gloss, (edge, edge))
+        art_cache[key] = pygame.transform.rotozoom(image, tilt, 1) if tilt else image
+    return art_cache[key]
 
 
 def fitted(image, long_side, degrees=0, flip=False):
@@ -466,3 +577,181 @@ def outline_fill(kind, mask, angle, edge, zoom=1):
         pygame.draw.circle(trace, color, point, line / 2)
     image.blit(pygame.transform.smoothscale(trace, (width, height)), (0, 0))
     return image
+
+
+def water(width, height, cell=.62, lighten=.8):
+    """The water wallpaper as a faint backdrop: mirror-tiled so it has no seams, then washed most of
+    the way to white so the board stays bright for the camera and the sprites stay the loudest thing."""
+    texture = art("water.jpg")
+    scale = max(width / texture.get_width(), height / texture.get_height()) * cell
+    tile = pygame.transform.smoothscale(texture, (math.ceil(texture.get_width() * scale), math.ceil(texture.get_height() * scale)))
+    surface = pygame.Surface((width, height), 0, 24)
+    for column in range(math.ceil(width / tile.get_width())):
+        for row in range(math.ceil(height / tile.get_height())):
+            surface.blit(pygame.transform.flip(tile, column % 2 == 1, row % 2 == 1), (column * tile.get_width(), row * tile.get_height()))
+    wash = pygame.Surface((width, height), pygame.SRCALPHA)
+    wash.fill((255, 255, 255, round(255 * lighten)))
+    surface.blit(wash, (0, 0))
+    return surface
+
+
+def tiled_ground(name, width, height, tile_width, lighten=0.0):
+    """A wallpaper mirror-tiled across the board, optionally washed toward white."""
+    texture = art(name)
+    scale = tile_width / texture.get_width()
+    tile = pygame.transform.smoothscale(texture, (math.ceil(texture.get_width() * scale), math.ceil(texture.get_height() * scale)))
+    surface = pygame.Surface((width, height), 0, 24)
+    for column in range(math.ceil(width / tile.get_width())):
+        for row in range(math.ceil(height / tile.get_height())):
+            surface.blit(pygame.transform.flip(tile, column % 2 == 1, row % 2 == 1), (column * tile.get_width(), row * tile.get_height()))
+    if lighten:
+        wash = pygame.Surface((width, height), pygame.SRCALPHA)
+        wash.fill((255, 255, 255, round(255 * lighten)))
+        surface.blit(wash, (0, 0))
+    return surface
+
+
+CHEST_WOOD = (158, 110, 74)
+CHEST_DARK = (120, 80, 58)
+GOLD = (245, 206, 96)
+
+
+def chest(size, zoom=1, open_lid=False):
+    """The treasure chest: banded wood, a gold lock, and coins when it is open."""
+    pen = Pen(64, 60, size * zoom / 44, zoom)
+    if open_lid:
+        pen.poly(CHEST_DARK, [(-20, -8), (-17, -25), (17, -25), (20, -8)])
+        for x, y, r in ((-9, -9, 5), (0, -12, 6), (9, -9, 5), (-4, -5, 5), (5, -5, 5)):
+            pen.ellipse(GOLD, (x, y), r, width=1.4)
+        for x, y in ((-14, -20), (13, -22), (1, -27)):
+            pen.poly(WHITE, [(x, y - 4), (x + 1.2, y - 1.2), (x + 4, y), (x + 1.2, y + 1.2), (x, y + 4), (x - 1.2, y + 1.2), (x - 4, y), (x - 1.2, y - 1.2)], INK, 1)
+    else:
+        pen.poly(CHEST_WOOD, [(-21, -4), (-19, -16), (-11, -23), (11, -23), (19, -16), (21, -4)])
+        pen.line(CHEST_DARK, (-12, -22), (-12, -5), 1.4)
+        pen.line(CHEST_DARK, (12, -22), (12, -5), 1.4)
+    pen.poly(CHEST_WOOD, [(-21, -4), (21, -4), (19, 20), (-19, 20)])
+    for x in (-12, 12):
+        pen.poly(GOLD, [(x - 3, -4), (x + 3, -4), (x + 3, 20), (x - 3, 20)], INK, 1.4)
+    pen.line(CHEST_DARK, (-20, 8), (20, 8), 1.4)
+    pen.ellipse(GOLD, (0, 2), 5.5, 6.5, width=1.6)
+    pen.ellipse(CHEST_DARK, (0, 2.5), 1.6, 2.4, outline=None)
+    pen.stroke([(-21, -4), (21, -4)], INK, 2, closed=False)
+    return pen.image()
+
+
+LEAF = (104, 176, 110)
+LEAF_LIGHT = (146, 204, 132)
+LEAF_DARK = (74, 140, 96)
+
+
+def tree(radius, seed=1, zoom=1):
+    """A tree from above: a lumpy canopy with a few lighter tufts."""
+    rng = random.Random(seed)
+    pen = Pen(72, 72, radius * zoom / 30, zoom)
+    lumps = [(0, 0, 22)] + [(19 * math.cos(a), 19 * math.sin(a), rng.uniform(11, 15)) for a in [index * math.tau / 7 + rng.uniform(-.2, .2) for index in range(7)]]
+    pen.union([(LEAF, pen.oval((x, y), r)) for x, y, r in lumps], 1.5, LEAF_DARK)
+    for x, y, r in ((-8, -9, 9), (9, 4, 7), (-4, 12, 6)):
+        pen.ellipse(LEAF_LIGHT, (x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)), r, outline=None)
+    for x, y in ((-10, -11), (8, 2), (-3, 11), (12, -10)):
+        pen.ellipse(tint(LEAF_LIGHT, .45), (x, y), 2.4, outline=None)
+    return pen.image()
+
+
+FAWN = (214, 164, 112)
+FAWN_DARK = (150, 100, 78)
+FAWN_PALE = (250, 234, 204)
+ANTLER = (146, 98, 76)
+
+
+def deer(size, zoom=1):
+    """A fawn sitting up and facing you, in the manner of Tim: big head, big eyes, pink ears, little antlers, spots."""
+    pen = Pen(64, 70, size * zoom / 24, zoom)
+    for side in (-1, 1):
+        pen.stroke([(side * 6, -17), (side * 9, -29)], ANTLER, 3.4, closed=False)
+        pen.stroke([(side * 8, -24), (side * 14, -28)], ANTLER, 3, closed=False)
+        pen.stroke([(side * 8.5, -26), (side * 4, -31)], ANTLER, 3, closed=False)
+    body = [(FAWN, pen.oval((0, 20), 13, 12)), (FAWN_PALE, pen.oval((15, 22), 5.5, 7, -.5))]
+    body += [(FAWN_DARK, pen.oval((side * 8, 30), 5, 3.2)) for side in (-1, 1)]
+    pen.union(body, 1.5, FUR_LINE)
+    pen.ellipse(FAWN_PALE, (0, 19), 7, 9, outline=None)
+    for x, y in ((9, 15), (11, 21), (-10, 17)):
+        pen.ellipse(FAWN_PALE, (x, y), 1.7, outline=None)
+    head = [(FAWN, pen.oval((side * 17, -9), 9, 5.5, side * -.75)) for side in (-1, 1)]
+    head += [(FAWN, pen.oval((side * 11, 5), 7, 6.5)) for side in (-1, 1)] + [(FAWN, pen.oval((0, -2), 18, 15.5))]
+    pen.union(head, 1.5, FUR_LINE)
+    for side in (-1, 1):
+        pen.ellipse(BLUSH, (side * 17, -9), 6, 3.2, side * -.75, outline=None)
+    pen.ellipse(FAWN_PALE, (0, 5), 11.5, 8.5, outline=None)
+    for x, y in ((-5, -13), (0, -15), (5, -13), (-9, -10)):
+        pen.ellipse(FAWN_PALE, (x, y), 1.6, outline=None)
+    for side in (-1, 1):
+        pen.ellipse(BEAVER_EYE, (side * 8, -1), 4.4, 5, outline=None)
+        pen.ellipse(WHITE, (side * 8 - 1.5, -3), 1.7, outline=None)
+        pen.ellipse(WHITE, (side * 8 + 1.6, 1.4), .9, outline=None)
+        pen.ellipse(BLUSH, (side * 13, 6), 3.2, 2.2, outline=None)
+    pen.ellipse(BEAVER_EYE, (0, 4), 2.6, 2, outline=None)
+    pen.stroke([(-4, 8), (-2, 10), (0, 8.4), (2, 10), (4, 8)], FUR_LINE, .9, closed=False)
+    return pen.image()
+
+
+def timber(length, width, zoom=1, seed=0):
+    """A plain floating log: the bark wallpaper with its grain along the log, round ends and a bark-brown edge."""
+    rng = random.Random(seed)
+    size = (max(2, round(length * zoom * SS)), max(2, round(width * zoom * SS)))
+    surface = pygame.Surface(size, pygame.SRCALPHA)
+    side = max(8, round(width * zoom * SS * 2.6))
+    texture = pygame.transform.smoothscale(pygame.transform.rotate(art("bark_rich.jpg"), 90), (side, side))
+    for x in range(-rng.randrange(side // 2), size[0], side):
+        for y in range(-rng.randrange(side // 2), size[1], side):
+            surface.blit(texture, (x, y))
+    shade = pygame.Surface(size, pygame.SRCALPHA)
+    pygame.draw.rect(shade, (70, 40, 30, 70), (0, size[1] * .68, size[0], size[1] * .32))
+    pygame.draw.rect(shade, (255, 240, 210, 46), (0, size[1] * .08, size[0], size[1] * .2))
+    surface.blit(shade, (0, 0))
+    corner = round(size[1] * .46)
+    mask = pygame.Surface(size, pygame.SRCALPHA)
+    pygame.draw.rect(mask, WHITE, mask.get_rect(), border_radius=corner)
+    surface.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    pygame.draw.rect(surface, BARK_LINE, surface.get_rect(), max(1, round(2.4 * zoom * SS)), border_radius=corner)
+    return pygame.transform.smoothscale(surface, (max(1, size[0] // SS), max(1, size[1] // SS)))
+
+
+BERRY = {"red": ((226, 72, 86), (160, 40, 58)), "blue": ((132, 112, 214), (96, 84, 176))}
+
+
+def berries(size, zoom=1, color="red"):
+    """A sprig of berries: eat them for a burst of speed.
+
+    Red is what was asked for and reads best on grass, but the camera takes saturated red for a laser dot
+    (vision.py: red >= 160 and red - max(green, blue) >= 60). If berries confuse laser tracking on the real
+    board, set [treasure] berry_color = "blue".
+    """
+    fill, edge = BERRY[color]
+    pen = Pen(44, 44, size * zoom / 14, zoom)
+    pen.stroke([(-2, -15), (0, -8), (4, -14)], LEAF_DARK, 1.6, closed=False)
+    pen.ellipse(LEAF, (8, -13), 7, 3.6, -.5, LEAF_DARK, 1.2)
+    pen.ellipse(LEAF, (-8, -13), 6, 3.2, .6, LEAF_DARK, 1.2)
+    for x, y, r in ((-7, 2, 8), (7, 1, 8.5), (0, 10, 8)):
+        pen.ellipse(fill, (x, y), r, outline=edge, width=1.4)
+        pen.ellipse(tint(fill, .6), (x - r * .35, y - r * .35), r * .3, outline=None)
+    return pen.image()
+
+
+def lodge(size, zoom=1):
+    """A beaver lodge: a dome of piled sticks with a doorway, and someone at home."""
+    rng = random.Random(4)
+    pen = Pen(80, 72, size * zoom / 34, zoom)
+    pen.ellipse(BARK, (0, 6), 34, 26, outline=BARK_LINE, width=2)
+    for index in range(26):
+        x, y = rng.uniform(-28, 28), rng.uniform(-14, 26)
+        if (x / 32) ** 2 + ((y - 6) / 24) ** 2 < .9:
+            angle = rng.uniform(-.6, .6) + (math.pi / 2 if index % 5 == 0 else 0)
+            reach = rng.uniform(6, 11)
+            pen.line(BARK_LINE, (x - reach * math.cos(angle), y - reach * math.sin(angle)), (x + reach * math.cos(angle), y + reach * math.sin(angle)), 2.6)
+            pen.line(BARK_LIGHT, (x - reach * math.cos(angle), y - reach * math.sin(angle) - .6), (x + reach * math.cos(angle), y + reach * math.sin(angle) - .6), 1.2)
+    pen.ellipse(CHEST_DARK, (0, 20), 10, 9, outline=BARK_LINE, width=1.6)
+    pen.ellipse(FUR, (0, 21), 6.5, 5.5, outline=None)
+    for side in (-1, 1):
+        pen.ellipse(BEAVER_EYE, (side * 2.6, 20), 1.3, outline=None)
+    pen.poly(WHITE, [(-1.4, 23), (1.4, 23), (1.4, 25.6), (-1.4, 25.6)], FUR_LINE, .7)
+    return pen.image()

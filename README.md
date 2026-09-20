@@ -1,8 +1,12 @@
 # Beaver Battle
 
+![Beaver Battles](docs/thumbnail.png)
+
 A projection-mapped canoe battle for two or three red-laser controllers. Python runs the game, USB camera, calibration, and UDP networking. ESP-IDF C runs the two buttons, laser output, and servo feedback on each ESP32 DevKit V1.
 
 ## Run now, without hardware
+
+Plain `uv run python -m beaver_battle` works with or without the hardware: it listens for the laser controllers, and while none is connected the mouse steers player 1, the keyboard works the menus, and bots fill the other canoes; as soon as a controller connects, the lasers take over, and the lowest controller's dot hovers the menus in place of the trackpad. `--simulate` does the same without ever opening the camera or the network port.
 
 Install Python 3.12 and [uv](https://docs.astral.sh/uv/), then run from the repository root:
 
@@ -12,13 +16,21 @@ uv run python -m beaver_battle --simulate
 uv run python -m beaver_battle --simulate --mouse --players 2
 ```
 
-The first command after setup runs three bots through complete matches. With `--mouse`, player 1 steers toward the mouse, left click fires/thrusts, and right click activates a pickup. `R` restarts, `Esc` pauses, and Enter/Down operate menus. Use `--fullscreen` for the projected game. Placeholder polygons can be replaced with `assets/canoe.png` and `assets/beaver.png`; keep artwork bright enough for camera segmentation.
+The first command after setup runs three bots through complete matches. A match opens by asking who is playing: type each name on the laptop and press Enter (Enter alone keeps `PLAYER N`; `--no-names` skips the question). Names appear on the scoreboard and on the knockout banner. With `--mouse`, player 1 steers toward the mouse, left click fires/thrusts, and right click activates a pickup. `R` restarts, `Esc` or `P` pauses, `I` opens the how-to-play page, and Enter/Down operate menus; the round buttons at the top right of the board do the same for a mouse. When a match ends, PLAY AGAIN (Enter, or controller button 1) restarts with the same players and MENU (Space, or button 2) returns to the lobby. Use `--fullscreen` for the projected game. Placeholder polygons can be replaced with `assets/canoe.png` and `assets/beaver.png`; keep artwork bright enough for camera segmentation.
 
 For a reproducible check without opening a window:
 
 ```sh
 uv run python -m beaver_battle --headless --seconds 60 --screenshot /tmp/beaver-battle.png --report /tmp/beaver-battle.json
 ```
+
+## Three games
+
+The launcher opens on a chooser: **Beaver Battle** (the canoe fight described here), **Treasure Dash**, which then asks whether one or two are playing, or **Dam It!**. `--game battle`, `--game treasure` (two players), `--game solo` (one) or `--game dam` skips the chooser, and both menus have a Change game button.
+
+**Treasure Dash** is for two players. A chest sits in the middle of a meadow of rocks and ponds. Each player has 30 seconds to draw a path from their corner to the chest: with a marker on the whiteboard, read by the same camera mask as Beaver Battle's walls, or with the cursor in simulation (hold the left button; right click when done). Breaks up to `merge_gap` pixels are joined; a path that never reaches the chest loses on the spot. Then the race: a beaver only walks while its player's laser traces the line just ahead of it, a rock on the line stops it there for good, ponds are crossed more slowly by swimming, and either button (a click, in simulation) gives a short speed boost on a cooldown. First to the chest wins. Boards are also dressed with trees and fallen sticks (which block like rocks), sprigs of blueberries that give a burst of speed, pairs of portals (ink to one pad carries on from its twin), and deer that dart about where they like and hold a beaver up only while they stand in its way. There are eight duel boards, each mirrored so both players face the same puzzle, with the scatter mirrored too and changed every match; one player instead picks one of three lopsided maps of broad, connected water (The Big River, Deer Park, Portal Woods), each with its own leaderboard and dressed the same way every time so that day's times compare, and a race is tuned to last about ten seconds. In simulation player 2 is a bot that draws and traces its own path, since there is one mouse. **With one player** it is the same game against the clock: the beaver starts at one edge and the chest sits at the other, so the path crosses the whole board. A finished run goes on today's leaderboard for that board (`leaderboard.json`, ignored by git and wiped when the date changes); the result screen shows today's table with RETRY, CHANGE MAP and MENU, and the one-or-two-players screen has a Today's best times page. Races are tuned to about ten seconds, swimming is 70% of walking speed so a short swim can beat a long detour, and rocks and ponds are scattered small. Settings live under `[treasure]` in `config.toml`; `checks/check_treasure.py` covers the rules. Only the simulated, cursor-drawn game has been played; drawing with real markers under the camera is untested.
+
+**Dam It!** is for two players who swap roles each round. A river comes down a valley that is wide at its mouth and narrow by a beaver lodge. The builder has 30 seconds to draw a dam (marker ink through the camera mask, or the cursor): open strokes become sticks, closed shapes become bark logs, hairline gaps are sealed, and a real gap leaks and loses at once. A dam has one fixed strength shared over all its wood by area, so drawing more makes every piece weaker and the work to breach a dam depends only on what share of its wood lies across the breach. Then the attacker's beaver follows their laser, a button chews the piece it is next to, a broken piece lets the river through, and water runs for the lodge at a fixed speed: flood the lodge within `attack_seconds` and the attacker wins, keep it dry and the builder does. A dam far from the lodge has to be long and therefore weak but the water then has far to run; one by the lodge can be short and strong but a breach floods at once. `checks/check_dam.py` sets a good bot attacker against nine bot dams (floods take 10 to 23 s) and requires `attack_seconds` to sit where the best dam against the best attack is a coin flip, with more than one dam worth building and a poor one losing. Settings are under `[dam]`. Only the simulated game has been played.
 
 ## Connect the physical game
 
@@ -45,7 +57,7 @@ Calibration markers are read through local contrast equalization and gathered ov
 
 The lowest connected controller ID operates menus. A disconnected controller or stale camera pauses physical play. Reconnect and choose Resume. Keyboard equivalents are Down/Tab, Enter/Space, Esc, and `C` for calibration. `F2` shows camera preview in the lobby/pause screen.
 
-Canoes always move forward; aim near the canoe or uncertain tracking retains heading. Three shots empty the primary reserve and trigger a full recharge; new weapon activations are blocked during recharge. First damage ejects the beaver; second damage eliminates it. Wall collisions bounce or slide without damage. Last survivor wins the round; first to five rounds wins the match. Barrels/asteroids drop lasers, jousters, and mines; turrets and cycling death beams add hazards.
+Canoes always move forward; aim near the canoe or uncertain tracking retains heading. A canoe holds three rocks and each comes back on its own after a second. First damage ejects the beaver; a second hit, or any canoe running it over, sinks it, but a beaver that survives seven seconds in the water gets a fresh canoe with a moment of grace. Canoes hug and slide along edges without damage. Whoever sinks a beaver scores the point; a round ends when one canoe is left, and the match ends at the end of a round once someone leads with five (a shared lead plays on). These are Astro Party's rules; `reload_mode`, `canoe_return`, `ram_swimmers` and `scoring` in `config.toml` switch each back to the original overheat, no-return, last-survivor rules. Barrels/asteroids drop lasers, jousters, and mines; turrets and cycling death beams add hazards.
 
 ## Configuration
 
