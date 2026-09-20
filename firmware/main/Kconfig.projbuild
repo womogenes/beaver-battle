@@ -90,6 +90,15 @@ config BB_SERVO_ENABLED
         Leave disabled until rest/press pulse widths and mechanical travel are
         calibrated. When disabled GPIO33 stays low and no servo pulse is sent.
 
+config BB_SERVO_MIRROR_PINS
+    bool "Mirror game servo PWM onto GPIO15/5/18/19/21"
+    depends on BB_SERVO_ENABLED && BB_ESPNOW_CONTROLLER
+    default n
+    help
+        Route the same servo channel to these additional outputs for pin testing.
+        GPIO33 remains active. Connect a servo signal to only one output at a time.
+        GPIO5 and GPIO15 are boot strapping pins; GPIO18 is preferred.
+
 config BB_SERVO_BUTTON_TEST
     bool "Servo button bench test (no Wi-Fi)"
     default n

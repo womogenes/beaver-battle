@@ -506,3 +506,13 @@ inputs immediately, never substitutes mouse controls during a live match, and
 opens the disconnect pause screen if the outage persists. Camera failure still
 pauses immediately. Software cannot guarantee that an undersized supply will
 stop browning out.
+
+## Alternate servo pin test
+
+`CONFIG_BB_SERVO_MIRROR_PINS=y` mirrors the normal ESP-NOW game servo channel
+onto GPIO15, GPIO5, GPIO18, GPIO19 and GPIO21, while retaining GPIO33. Every
+output carries the same calibrated squeeze and idle shutdown; radio, buttons,
+and laser behavior are unchanged. This is off by default and was enabled for
+controller 2's requested pin-isolation test. Prefer GPIO18; GPIO5 and GPIO15
+also have boot-strapping roles. Connect the servo signal to one pin at a time,
+not multiple ESP32 outputs together.
