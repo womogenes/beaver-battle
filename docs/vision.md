@@ -152,3 +152,24 @@ The blink identity scheme is confirmed in firmware but unread by vision. Control
 gate measured 76.9 and 79.6 percent duty across two runs against a designed 78, and
 controller 1 exactly 100. Whether a camera can recover that blink is untested and stays
 untested until both dots are reliably visible.
+
+## Linux two-controller live test, 2026-09-20
+
+With the HDMI projector active and the Arducam at 1280x720/30, automatic exposure
+washed controller 1's dot toward white: the dot was visible but failed the redness
+threshold, preventing solo-window acquisition. On this camera, a temporary V4L2
+manual exposure trial (`auto_exposure=1`, `exposure_time_absolute=100`, nominally
+10 ms) restored detection without lowering the red threshold. The initial trial
+at 60 also produced real player-1 coordinates. These controls are device-specific;
+inspect `v4l2-ctl --list-ctrls` before applying them. Exposure was changed in the
+running device, not persisted by the launcher. Recalibrate the board after settling
+camera controls, especially before relying on the captured wall/illumination reference.
+
+In a subsequent 15-second stationary two-dot sample, 450 frames were processed.
+Both dots were detected in 347 frames. Both identities had valid coordinates in
+279 frames; among the 304 frames with both gate reports on and settled, that is
+279/304 (91.8%). The all-frame simultaneous tracking rate was 62%, including the
+intentional blink and transition pauses. This proves physical acquisition and
+association now operate through the ESP-NOW telemetry path; it does not establish
+fast-motion accuracy, crossing robustness, or continuous two-player aiming.
+Captures and raw telemetry remain outside git.
