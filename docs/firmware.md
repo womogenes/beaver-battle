@@ -204,7 +204,31 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
-## Wireless controller from Arduino
+## ESP-NOW, with a third board as the receiver
+
+`controller_espnow_1`, `_2` and `receiver_espnow` avoid the venue's network completely.
+ESP-NOW is peer to peer on the Wi-Fi radio: no access point, no association, no DHCP and
+nothing from the room in the path. That removes the failure this project has already hit,
+where client isolation stopped controllers reaching the laptop while the internet worked.
+
+A laptop cannot speak ESP-NOW, which is why the third board is needed. It listens and
+writes each packet to USB serial as a line, and `beaver_battle.relay` turns those lines
+back into the UDP datagrams the game already expects, so the bridge, the protocol and the
+game are untouched and the radio can change without any of them noticing.
+
+    uv run --with pyserial python -m beaver_battle.relay --port /dev/cu.usbserial-0001
+
+All three boards must sit on the same channel, fixed at 1 in the sketches rather than
+inherited from an access point that does not exist. The payload is exactly the PROTOCOL.md
+v1 input packet, and the controllers broadcast rather than unicast so no board needs the
+receiver's MAC compiled into it.
+
+The relay gives every controller its own socket. The bridge treats a controller's endpoint
+as its identity and drops packets that seem to come from somewhere new while the old
+endpoint is still live, so one shared socket would make the two controllers look like
+impostors of each other.
+
+## Wireless controller from Arduino, over ordinary Wi-Fi
 
 `firmware/arduino/controller_wifi_1` and `_2` speak PROTOCOL.md v1 over UDP, so button two
 reaches the laptop from a machine that has no ESP-IDF. The ESP-IDF build in `main/` is the
