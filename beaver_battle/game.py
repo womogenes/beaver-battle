@@ -129,30 +129,245 @@ def prop_rect(prop):
     return pygame.FRect(prop.pos.x - prop.size[0] / 2, prop.pos.y - prop.size[1] / 2, *prop.size)
 
 
-def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf):
-    """Find bright regions fully enclosed by ink. Returns (ink plus interiors, shapes).
+def stroke_ends(ink, look=15, min_branch=25):
+    """Free ends of the drawing, with the direction each was travelling when it stopped.
 
-    Small breaks in an outline are bridged only for the enclosure test. Regions
-    touching the board edge are open water, and enclosures above max_area stay
+    A break in a stroke leaves two ends facing one another. Two arms of one shape merely
+    passing close by leave no ends at all, which is what separates a pen lift from a
+    spiral's neighbouring turns and keeps this from welding a drawing shut.
+
+    Thinning a hand-drawn blob sprouts short spurs all over it, and every spur looks like
+    an end, so only ends belonging to a branch of at least `min_branch` pixels count. That
+    is the difference between a line that stopped and a ragged edge.
+    """
+    thin = cv2.ximgproc.thinning(ink * 255) > 0
+    if not thin.any():
+        return []
+    # An integer kernel does not sum in filter2D; it has to be floating point.
+    neighbours = cv2.filter2D(thin.astype(np.float32), cv2.CV_32F, np.ones((3, 3), np.float32),
+                              borderType=cv2.BORDER_CONSTANT)
+    tips = thin & (neighbours == 2)
+    if not tips.any():
+        return []
+    # Cutting the junctions apart leaves plain arcs, whose pixel count is their length.
+    arcs = thin & (neighbours <= 3)
+    count, branch = cv2.connectedComponents(arcs.astype(np.uint8), connectivity=8)
+    length = np.bincount(branch.ravel(), minlength=count)
+    span = max(3, int(look)) | 1
+    mass = cv2.blur(ink.astype(np.float32), (span, span))
+    towards_x = cv2.blur((ink * np.arange(ink.shape[1])).astype(np.float32), (span, span))
+    towards_y = cv2.blur((ink * np.arange(ink.shape[0])[:, None]).astype(np.float32), (span, span))
+    ends = []
+    for y, x in zip(*np.nonzero(tips)):
+        piece = branch[y, x]
+        if not piece or length[piece] < min_branch:
+            continue
+        weight = mass[y, x]
+        if weight <= 0:
+            continue
+        # The stroke's body lies behind the end, so heading away from it is heading on.
+        away = np.array([x - towards_x[y, x] / weight, y - towards_y[y, x] / weight])
+        reach = np.hypot(*away)
+        if reach < 1.0:
+            continue
+        ends.append(((int(x), int(y)), away / reach))
+    return ends
+
+
+def mend_breaks(walls, reach=90, spread=60, thickness=3, look=15, min_branch=25, record=None):
+    """Carry a stroke's free end on to whatever it was heading for. Returns the mended mask.
+
+    link_strokes joins separate pieces, which leaves the case that broke the bench board:
+    a stroke interrupted part way round a loop, whose two sides are still one piece
+    because they meet somewhere else entirely. Connectivity cannot see that gap, and a
+    canoe fits through it.
+
+    Each free end is carried forward within `spread` degrees of the way it was going and
+    joined to the first ink within `reach`. Requiring a free end, and requiring the ink to
+    lie ahead of the stroke rather than beside it, is what keeps a spiral or a letter C
+    from being welded shut: their arms come close, but neither ends pointing at the other.
+    """
+    ink = walls.astype(np.uint8)
+    ends = stroke_ends(ink, look, min_branch)
+    if not ends:
+        return walls
+    steps = np.arange(look, int(reach) + 1)
+    angles = np.radians(np.arange(-int(spread), int(spread) + 1, 5))
+    mended = ink.copy()
+    height, width = ink.shape
+    for (x, y), heading in ends:
+        base = math.atan2(heading[1], heading[0]) + angles
+        xs = np.clip(np.rint(x + np.cos(base)[:, None] * steps).astype(int), 0, width - 1)
+        ys = np.clip(np.rint(y + np.sin(base)[:, None] * steps).astype(int), 0, height - 1)
+        hits = ink[ys, xs] > 0
+        if not hits.any():
+            continue
+        first = np.where(hits.any(axis=1), hits.argmax(axis=1), len(steps))
+        ray = int(np.argmin(first))
+        if first[ray] >= len(steps):
+            continue
+        target = (int(xs[ray, first[ray]]), int(ys[ray, first[ray]]))
+        cv2.line(mended, (x, y), target, 1, thickness)
+        if record is not None:
+            record.append(((x, y), target))
+    return mended.astype(bool)
+
+
+def link_strokes(walls, reach=70, min_piece=40, thickness=3, record=None):
+    """Rejoin a stroke the camera broke into pieces. Returns the repaired mask.
+
+    A line drawn in one movement arrives in fragments wherever the pen ran dry or the ink
+    went faint, and on the bench a single curve came through in seven pieces with 36 to 65
+    pixel holes between them. A barrier with a hull-sized hole is not a barrier, and a
+    player who drew one continuous line is entitled to one continuous wall, so fragments
+    whose nearest points come within `reach` are joined by the shortest segment between
+    them. A stroke that is already whole gains nothing and is left alone.
+
+    Candidate pairs are found from one distance transform: where two background pixels
+    side by side are closest to different pieces, the sum of their distances is the width
+    of the channel separating those pieces. Only the pairs that pass then pay for an exact
+    search, over contour points rather than every pixel.
+    """
+    ink = walls.astype(np.uint8)
+    count, pieces, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    if count <= 2:
+        return walls
+    distance, nearest = cv2.distanceTransformWithLabels(
+        1 - ink, cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_CCOMP)
+    owner = np.zeros(int(nearest.max()) + 1, np.int32)
+    ys, xs = np.nonzero(ink)
+    owner[nearest[ys, xs]] = pieces[ys, xs]
+    narrowest = np.full(count * count, np.inf, np.float32)
+    for sideways in (True, False):
+        if sideways:
+            left, right = owner[nearest[:, :-1]], owner[nearest[:, 1:]]
+            width = distance[:, :-1] + distance[:, 1:]
+        else:
+            left, right = owner[nearest[:-1]], owner[nearest[1:]]
+            width = distance[:-1] + distance[1:]
+        split = (left != right) & (left > 0) & (right > 0) & (width <= reach)
+        if not split.any():
+            continue
+        low = np.minimum(left[split], right[split]).astype(np.int64)
+        high = np.maximum(left[split], right[split]).astype(np.int64)
+        np.minimum.at(narrowest, low * count + high, width[split])
+    channel = {(int(key // count), int(key % count)): float(narrowest[key])
+               for key in np.nonzero(np.isfinite(narrowest))[0]}
+    if not channel:
+        return walls
+    wanted = set(index for pair in channel for index in pair
+                 if stats[index, cv2.CC_STAT_AREA] >= min_piece)
+    outlines = {}
+    found, _ = cv2.findContours(ink, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
+    for contour in found:
+        points = contour.reshape(-1, 2)
+        piece = int(pieces[points[0][1], points[0][0]])
+        if piece in wanted:
+            outlines.setdefault(piece, []).append(points)
+    # Every boundary pixel of a long thin stroke is thousands of points; a sparse walk
+    # round it finds the same crossing place for a fraction of the pairwise work.
+    edges = {}
+    for piece, parts in outlines.items():
+        points = np.vstack(parts)
+        stride = max(1, len(points) // 300)
+        edges[piece] = points[::stride]
+    bridged = ink.copy()
+    for (first, second) in sorted(channel, key=channel.get):
+        if first not in edges or second not in edges:
+            continue
+        here, there = edges[first], edges[second]
+        spans = np.linalg.norm(here[:, None, :] - there[None, :, :], axis=2)
+        index = int(np.argmin(spans))
+        if spans.flat[index] > reach:
+            continue
+        start = tuple(int(value) for value in here[index // spans.shape[1]])
+        finish = tuple(int(value) for value in there[index % spans.shape[1]])
+        cv2.line(bridged, start, finish, 1, thickness)
+        if record is not None:
+            record.append((start, finish))
+    return bridged.astype(bool)
+
+
+def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
+    """Find regions enclosed by ink. Returns (ink plus interiors, shapes).
+
+    A hand-drawn outline almost never closes, and a camera breaks it further wherever the
+    pen ran dry, so demanding a watertight loop filled almost nothing of a real board.
+    Ink is instead grown outward at increasing radii and an enclosure is taken at the
+    first radius that reveals it, provided the bridged gap stays small beside the
+    enclosure's own size: at most `closure` of its linear extent.
+
+    That ratio is the whole judgement, and it is what separates a circle with a pen lift
+    from a letter C. Both are rings with a gap; only one has a gap small compared to what
+    it surrounds, and an absolute pixel tolerance cannot tell them apart because a large
+    shape may be missing far more ink than a small one and still plainly be a container.
+
+    Ink is grown rather than closed. A morphological closing joins two stroke ends when
+    dilated, then severs them again when eroded, so it needs a radius several times the
+    gap it is bridging and the ratio stops meaning anything. One distance transform of the
+    background serves every radius, which is also what makes this affordable.
+
+    Regions touching the board edge are open water, and enclosures above max_area stay
     hollow so an arena outline cannot turn the whole board solid.
     """
     ink = walls.astype(np.uint8)
-    if gap > 1:
-        ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (gap, gap)))
-    contours, hierarchy = cv2.findContours(ink, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    distance = cv2.distanceTransform((ink == 0).astype(np.uint8), cv2.DIST_L2, 3)
     interior = np.zeros_like(ink)
+    accepted = np.zeros_like(ink)
     shapes = []
-    for contour, links in zip(contours, hierarchy[0] if hierarchy is not None else []):
-        if links[3] < 0 or not min_area <= cv2.contourArea(contour) <= max_area:
-            continue
-        center, (across, along), degrees = cv2.minAreaRect(contour)
-        if across > along:
-            across, along, degrees = along, across, degrees - 90
-        ratio = along / max(across, 1)
-        # minAreaRect's angle belongs to its first side; the grain follows the long side.
-        shapes.append(Shape("log" if ratio >= 2 else "rock", contour, center,
-                            math.radians(degrees + 90) % math.pi, ratio))
-        cv2.drawContours(interior, [contour], -1, 1, -1)
+    # Beyond this no radius can satisfy the ratio, whatever it might enclose.
+    reach = closure * math.sqrt(min(max_area, float(walls.size))) / 2
+    radii, step = [0], max(1, int(gap) // 2)
+    while step <= reach:
+        radii.append(step)
+        step *= 2
+    for radius in radii:
+        grown = (distance <= radius).astype(np.uint8)
+        contours, hierarchy = cv2.findContours(grown, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        fresh = np.zeros_like(ink)
+        for contour, links in zip(contours, hierarchy[0] if hierarchy is not None else []):
+            if links[3] < 0:
+                continue
+            area = cv2.contourArea(contour)
+            # The hole was measured after the ink grew inward over it, so restore that
+            # before judging size. A small ring found at a large radius is otherwise
+            # rejected for being small when most of what was measured is the growth.
+            extent = math.sqrt(max(area, 0.0)) + 2 * radius
+            if not min_area <= extent ** 2 <= max_area:
+                continue
+            if 2 * radius > closure * extent:
+                continue
+            moments = cv2.moments(contour)
+            if moments["m00"] <= 0:
+                continue
+            x = min(max(int(moments["m10"] / moments["m00"]), 0), ink.shape[1] - 1)
+            y = min(max(int(moments["m01"] / moments["m00"]), 0), ink.shape[0] - 1)
+            if accepted[y, x]:
+                continue
+            outline = contour
+            if radius:
+                # The art must cover what is solid, so restore the growth on this outline
+                # too, not only on the mask. Cropped to its own corner of the board.
+                left, top, wide, tall = cv2.boundingRect(contour)
+                pad = radius + 2
+                patch = np.zeros((tall + 2 * pad, wide + 2 * pad), np.uint8)
+                cv2.drawContours(patch, [contour], -1, 1, -1, offset=(pad - left, pad - top))
+                span = 2 * radius + 1
+                patch = cv2.dilate(patch, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
+                grown, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if grown:
+                    outline = max(grown, key=cv2.contourArea) + np.int32([left - pad, top - pad])
+            center, (across, along), degrees = cv2.minAreaRect(outline)
+            if across > along:
+                across, along, degrees = along, across, degrees - 90
+            ratio = along / max(across, 1)
+            # minAreaRect's angle belongs to its first side; the grain follows the long side.
+            shapes.append(Shape("log" if ratio >= 2 else "rock", outline, center,
+                                math.radians(degrees + 90) % math.pi, ratio))
+            cv2.drawContours(fresh, [outline], -1, 1, -1)
+        # Only once a radius completes, so one pass can take concentric enclosures both.
+        interior |= fresh
+        accepted |= fresh
     return walls | interior.astype(bool), shapes
 
 
@@ -182,9 +397,11 @@ class Game:
     shore: float = 0.0
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
+    ink_art: object = None
+    bridges: dict = field(default_factory=dict)
+    wall_tick: int = 0
     sticks: list = field(default_factory=list)
     loose_ink: np.ndarray | None = None
-    show_ink: bool = False
     pads: list = field(default_factory=list)
 
     def setting(self, name, default):
@@ -203,6 +420,7 @@ class Game:
         self.scores = dict.fromkeys(ids, 0)
         self.drop_bag = []
         self.wall_source = None
+        self.bridges.clear()
         self.walls = None
         self.wall_distance = None
         self.wall_masks.clear()
@@ -273,10 +491,23 @@ class Game:
             raise ValueError("Walls must be a bool array matching game height and width")
         self.wall_source = walls
         shapes = []
+        ink = walls
         if walls is not None:
-            walls, shapes = closed_shapes(walls, round(self.setting("shape_gap", 5) * self.scale),
-                                          self.setting("shape_min_area", 400) * self.scale ** 2,
-                                          self.setting("shape_max_fraction", .25) * self.width * self.height)
+            # A line drawn in one movement must hold as one barrier, whatever the camera
+            # made of it, so repair the stroke before anything else reads the geometry.
+            thickness = max(1, round(self.setting("stroke_width", 3) * self.scale))
+            found = []
+            ink = link_strokes(walls, round(self.setting("stroke_link", 40) * self.scale),
+                               round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
+                               thickness, record=found)
+            # Then carry any free end on, which reaches breaks that connectivity cannot see.
+            ink = mend_breaks(ink, round(self.setting("stroke_mend", 180) * self.scale),
+                              self.setting("stroke_spread", 60), thickness, record=found)
+            ink = self.hold_bridges(ink, found, thickness)
+            walls, shapes = closed_shapes(ink, round(self.setting("shape_gap", 5) * self.scale),
+                                          self.setting("shape_min_area", 1200) * self.scale ** 2,
+                                          self.setting("shape_max_fraction", .25) * self.width * self.height,
+                                          self.setting("shape_closure", .70))
         for shape in shapes:
             # Camera jitter must not flip a fill between log and rock or wobble its grain.
             for old in self.shapes:
@@ -288,14 +519,45 @@ class Game:
                     break
         self.shapes = shapes
         self.shape_art = None
-        self.sticks, self.loose_ink = self.find_sticks(self.wall_source, shapes)
+        self.ink_art = None
+        self.sticks, self.loose_ink = self.find_sticks(ink, shapes)
         self.walls = walls
         self.wall_distance = cv2.distanceTransform((~walls).astype(np.uint8), cv2.DIST_L2, 5) if walls is not None else None
         self.wall_masks.clear()
         return True
 
+    def hold_bridges(self, ink, found, thickness):
+        """Keep a repair in place for a while after the evidence for it flickers out.
+
+        Whether a free end is visible on any one frame turns on a pixel or two, and a
+        bridge appearing or vanishing takes a whole enclosure with it: measured on a still
+        board, solid area swung by a factor of two and filled bodies came and went between
+        six and ten. The board is not changing, only our reading of it, so a repair is
+        remembered for `game.bridge_memory` wall updates and forgotten only once nothing
+        has proposed it again for that long.
+        """
+        self.wall_tick += 1
+        memory = max(1, int(self.setting("bridge_memory", 25)))
+        for start, finish in found:
+            # Round the ends so the same repair refreshes rather than piling up.
+            key = (start[0] // 8, start[1] // 8, finish[0] // 8, finish[1] // 8)
+            self.bridges[key] = (self.wall_tick, start, finish)
+        held = ink.astype(np.uint8)
+        for key, (seen, start, finish) in list(self.bridges.items()):
+            if self.wall_tick - seen > memory:
+                del self.bridges[key]
+                continue
+            cv2.line(held, start, finish, 1, thickness)
+        return held.astype(bool)
+
     def find_sticks(self, ink, shapes):
-        """Open strokes of ink: long thin ones render as sticks, anything else is left as plain ink."""
+        """Pick out long straight strokes for stick art. Every stroke is painted regardless.
+
+        Stick art is decoration laid over the ink, not a substitute for it. A straight bar
+        drawn across a curved fragment leaves the bends unpainted, and a component that is
+        neither straight enough nor large enough used to be painted by nothing at all, so
+        a beaver would stop dead against geometry the player could not see.
+        """
         if ink is None:
             return [], None
         count, labels, stats, centers = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
@@ -303,7 +565,7 @@ class Game:
         for shape in shapes:
             points = shape.contour.reshape(-1, 2)
             outlines.update(int(label) for label in labels[points[:, 1], points[:, 0]] if label)
-        sticks, loose = [], np.zeros(ink.shape, bool)
+        sticks = []
         for label in range(1, count):
             if label in outlines or stats[label][4] < 40 * self.scale ** 2:
                 continue
@@ -313,9 +575,7 @@ class Game:
                 across, along, degrees = along, across, degrees - 90
             if across <= 18 * self.scale and along >= 3 * max(across, 1):
                 sticks.append((center, along, max(across, 4 * self.scale), math.radians(degrees + 90)))
-            else:
-                loose |= labels == label
-        return sticks, loose
+        return sticks, np.array(ink, dtype=bool)
 
     def wall_mask(self, radius):
         radius = max(0, math.ceil(radius))
@@ -731,13 +991,21 @@ class Game:
             surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))
         if self.shape_art is None:
             self.shape_art = [self.shape_image(shape) for shape in self.shapes] + [self.stick_image(stick) for stick in self.sticks]
-            if self.show_ink and self.loose_ink is not None and self.loose_ink.any():
+            self.ink_art = None
+            if self.loose_ink is not None and self.loose_ink.any():
+                # Everything solid is painted, at least as wide as it collides.
+                width = max(1, round(self.setting("ink_width", 5) * self.scale)) | 1
+                shown = cv2.dilate(self.loose_ink.astype(np.uint8),
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (width, width))).astype(bool)
                 ink = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
                 pixels, opacity = pygame.surfarray.pixels3d(ink), pygame.surfarray.pixels_alpha(ink)
-                pixels[self.loose_ink.T] = sprites.BARK_LINE
-                opacity[self.loose_ink.T] = 255
+                pixels[shown.T] = sprites.BARK_LINE
+                opacity[shown.T] = 255
                 del pixels, opacity
-                self.shape_art.append((ink, (0, 0)))
+                self.ink_art = ink
+        if self.ink_art is not None:
+            # Never bobbed: ink is where the collision is, and must be drawn there.
+            surface.blit(self.ink_art, (0, 0))
         surface.blits([(image, self.bob(index, topleft)) for index, (image, topleft) in enumerate(self.shape_art)])
         for index, prop in enumerate(self.props):
             if prop.hp <= 0:

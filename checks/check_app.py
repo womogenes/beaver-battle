@@ -25,6 +25,7 @@ def key(value):
 class Scenario:
     script: object
     fault: str = ''
+    argv: list = field(default_factory=lambda: ['beaver-battle'])
     now: float = 100.0
     stage: int = 0
     frames: int = 0
@@ -87,12 +88,13 @@ class Scenario:
                 (app, 'IdentityScheduler', lambda config: Mock()),
                 (vision, 'Vision', lambda config: self.vision),
                 (game, 'Game', lambda config: self.game),
-                (sys, 'argv', ['beaver-battle']),
+                (sys, 'argv', self.argv),
             ):
                 patches.enter_context(patch.object(target, name, value))
             with contextlib.redirect_stdout(io.StringIO()):
                 app.main()
         assert self.done
+        self.bridge = bridge
         bridge.stop.assert_called_once()
         self.vision.stop.assert_called_once()
         assert not pygame.get_init(), 'pygame must close on exit'
@@ -160,6 +162,20 @@ def calibration_cancel(run, state):
         run.done = True
 
 
+def bench_autostart(run, state):
+    """The bench runs the real camera path with no controllers connected at all."""
+    if run.stage == 0:
+        assert state['mode'] == 'calibration'
+        run.stage = 1
+    elif run.stage == 1:
+        assert state['mode'] == 'calibration', 'Markers must stay up until calibration succeeds'
+        run.calibrated = True
+        run.stage = 2
+    elif run.stage == 2 and state['mode'] == 'game':
+        run.stage = 3
+        run.done = True
+
+
 def main():
     result = Scenario(lifecycle).run()
     assert [mode for mode, elapsed in result.history] == [
@@ -173,7 +189,16 @@ def main():
         Scenario(unhealthy_resume, fault).run()
     for method in ('keyboard', 'controller'):
         Scenario(calibration_cancel, method).run()
-    print('App lifecycle, guarded resume, calibration cancellation, and cleanup checks passed.')
+
+    bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '3'], active=[])
+    bench.run()
+    modes = [mode for mode, elapsed in bench.history]
+    assert modes == ['calibration', 'countdown', 'game'], modes
+    bench.bridge.start.assert_not_called()
+    bench.vision.start.assert_called_once()
+    assert bench.game.new_match.call_count == 2, 'One startup match plus one built from the board scan'
+    assert bench.game.update.call_count > 0, 'Bench must reach live physics without controllers'
+    print('App lifecycle, guarded resume, calibration cancellation, bench autostart, and cleanup checks passed.')
 
 
 if __name__ == '__main__':
