@@ -1130,6 +1130,9 @@ class Game:
         # (it does on macOS); once that holds zeros, text blitted onto it shows its invisible box.
         screen, surface = surface, self.sprite(("canvas",), lambda: pygame.Surface((self.width, self.height), 0, 24))
         surface.fill(WATER)
+        sway = round(14 * unit)
+        water = self.sprite(("water",), lambda: sprites.water(self.width + 2 * sway, self.height + 2 * sway, lighten=self.setting("water_wash", .8)))
+        surface.blit(water, (-sway + sway * math.sin(self.time * .45), -sway + sway * math.cos(self.time * .35)))
         for index, pad in enumerate(self.pads):
             image = self.sprite(("pad", index), lambda: sprites.lily_pad(16 * unit, degrees=index * 67, flower=index % 3 != 2))
             surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))

@@ -523,3 +523,19 @@ def outline_fill(kind, mask, angle, edge, zoom=1):
         pygame.draw.circle(trace, color, point, line / 2)
     image.blit(pygame.transform.smoothscale(trace, (width, height)), (0, 0))
     return image
+
+
+def water(width, height, cell=.62, lighten=.8):
+    """The water wallpaper as a faint backdrop: mirror-tiled so it has no seams, then washed most of
+    the way to white so the board stays bright for the camera and the sprites stay the loudest thing."""
+    texture = art("water.jpg")
+    scale = max(width / texture.get_width(), height / texture.get_height()) * cell
+    tile = pygame.transform.smoothscale(texture, (math.ceil(texture.get_width() * scale), math.ceil(texture.get_height() * scale)))
+    surface = pygame.Surface((width, height), 0, 24)
+    for column in range(math.ceil(width / tile.get_width())):
+        for row in range(math.ceil(height / tile.get_height())):
+            surface.blit(pygame.transform.flip(tile, column % 2 == 1, row % 2 == 1), (column * tile.get_width(), row * tile.get_height()))
+    wash = pygame.Surface((width, height), pygame.SRCALPHA)
+    wash.fill((255, 255, 255, round(255 * lighten)))
+    surface.blit(wash, (0, 0))
+    return surface

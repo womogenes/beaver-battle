@@ -210,6 +210,8 @@ class Juice:
             if age < 0:
                 continue
             grow = 1 - (1 - age / span) ** 3
+            if (9 * self.scale) * (1 - age / span) < 1.5:
+                continue  # Let a spent ring vanish instead of lingering as a hairline circle.
             pygame.draw.circle(surface, sprites.INK, pos, reach * grow + ink, max(1, round((9 * self.scale) * (1 - age / span)) + 2 * ink))
             pygame.draw.circle(surface, color, pos, reach * grow, max(1, round((9 * self.scale) * (1 - age / span))))
         for pos, age, span, reach, color, twist in self.bursts:
