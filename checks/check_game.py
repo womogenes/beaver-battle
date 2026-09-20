@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import pygame
 
-from beaver_battle.game import Game, Mine, Pickup, Prop, Rock, closed_shapes
+from beaver_battle.game import Game, Mine, Pickup, Prop, Rock, Shape, closed_shapes
 from beaver_battle.model import PlayerInput
 
 
@@ -22,6 +22,13 @@ with open("config.toml", "rb") as source:
     config = tomllib.load(source)
 # These checks describe the original rule set; checks/check_rules.py covers the Astro Party one.
 config["game"].update(reload_mode="magazine", canoe_return=0, scoring="survivor", ram_swimmers=False)
+
+
+def update_board(game, dt, inputs, walls):
+    """Explicit geometry fixture installation; gameplay ignores subsequent scans."""
+    if game.replace_walls(walls):
+        game.resolve_walls()
+    return game.update(dt, inputs)
 
 
 def arena(players=(1, 2), moving=False):
@@ -124,7 +131,7 @@ assert game.winner is None and not any(game.scores.values())
 game = arena()
 walls = np.zeros((720, 1280), dtype=bool)
 walls[:, 300] = True
-game.update(0, {}, walls)
+update_board(game, 0, {}, walls)
 game.rocks.append(Rock(1, pygame.Vector2(250, 350), pygame.Vector2(20000, 0), 4, 2))
 game.update(1 / 60, {})
 assert not game.rocks and game.players[2].state == "canoe"
@@ -137,17 +144,17 @@ game.players[1].pos = pygame.Vector2(281, 350)
 game.shoot(1, game.players[1].pos, 0, 18)
 assert not game.rocks
 
-# Live ink safely relocates players and pickups, never damages them, and can resume.
+# Explicit geometry replacement safely relocates players and pickups, never damages them, and can resume.
 game = arena()
 walls = np.zeros((720, 1280), dtype=bool)
 walls[280:420, 130:270] = True
 game.mines.append(Mine(1, pygame.Vector2(200, 350), 9))
-game.update(0, {}, walls)
+update_board(game, 0, {}, walls)
 assert game.physical_free(game.players[1].pos, game.players[1].radius)
 assert game.players[1].state == "canoe" and not game.events and not game.mines
-game.update(0, {}, np.ones_like(walls))
+update_board(game, 0, {}, np.ones_like(walls))
 assert game.blocked and game.error
-game.update(0, {}, np.zeros_like(walls))
+update_board(game, 0, {}, np.zeros_like(walls))
 assert not game.blocked and not game.error
 
 # Closed ink outlines become solid logs or rocks; open, edge-bounded, tiny, and arena-sized ones stay hollow.
@@ -179,10 +186,10 @@ assert solid[420, 400] and solid[300, 850] and not walls[420, 400] and not walls
 assert not solid[560, 1000] and not solid[690, 640] and not solid[600, 150] and not solid[200, 640]
 assert np.array_equal(solid & walls, walls)
 
-# Fills follow the live mask: a hairline break is bridged, erasing a real gap reopens the water, redrawing refills.
+# Geometry builder fills follow supplied masks: a hairline break is bridged, erasing a real gap reopens the water, redrawing refills.
 game = arena()
 game.players[1].pos = pygame.Vector2(400, 420)
-game.update(0, {}, drawing(log_outline))
+update_board(game, 0, {}, drawing(log_outline))
 assert [shape.kind for shape in game.shapes] == ["log"] and not game.blocked
 assert not game.physical_free(pygame.Vector2(400, 420), 4)
 assert game.physical_free(game.players[1].pos, game.players[1].radius) and game.players[1].state == "canoe"
@@ -191,32 +198,32 @@ end, target = game.trace(pygame.Vector2(100, 420), pygame.Vector2(700, 420), 4, 
 assert target == "wall" and end.x < 400
 hairline = drawing(rock_outline)
 hairline[298:301, 900:940] = False
-game.update(0, {}, hairline)
+update_board(game, 0, {}, hairline)
 assert [shape.kind for shape in game.shapes] == ["rock"] and not game.physical_free(pygame.Vector2(850, 300), 4)
 # Filling now tolerates a gap up to game.shape_closure of a shape's own width, so what
 # counts as erased is proportional too: a marker-width nick no longer reopens a fill, and
 # a doorway has to be a real one. That is the cost of bridging pen lifts and dry dashes.
 erased = drawing(rock_outline)
 erased[190:410, 850:940] = False
-game.update(0, {}, erased)
+update_board(game, 0, {}, erased)
 assert not game.shapes and game.physical_free(pygame.Vector2(850, 300), 4)
-game.update(0, {}, drawing(rock_outline))
+update_board(game, 0, {}, drawing(rock_outline))
 assert len(game.shapes) == 1 and not game.physical_free(pygame.Vector2(850, 300), 4)
 
 # Camera jitter neither wobbles the grain nor flips a borderline fill between log and rock.
 game = arena()
-game.update(0, {}, drawing(log_outline))
+update_board(game, 0, {}, drawing(log_outline))
 angle = game.shapes[0].angle
-game.update(0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 28)))
+update_board(game, 0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 28)))
 assert game.shapes[0].angle == angle
-game.update(0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 60)))
+update_board(game, 0, {}, drawing(lambda ink: log_outline(ink, (402, 419), 60)))
 assert abs(math.degrees(game.shapes[0].angle) - 60) < 2
-game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (810, 400), 1, 6)))
+update_board(game, 0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (810, 400), 1, 6)))
 assert game.shapes[0].kind == "log" and 2 < game.shapes[0].ratio < 2.3
-game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
+update_board(game, 0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
 assert game.shapes[0].kind == "log" and game.shapes[0].ratio < 2
-game.update(0, {}, np.zeros((720, 1280), dtype=bool))
-game.update(0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
+update_board(game, 0, {}, np.zeros((720, 1280), dtype=bool))
+update_board(game, 0, {}, drawing(lambda ink: cv2.rectangle(ink, (600, 300), (790, 400), 1, 6)))
 assert game.shapes[0].kind == "rock"
 
 # Wall impacts preserve lives and reflect the moving canoe.
@@ -224,7 +231,7 @@ game = arena((1,), moving=True)
 game.players[1].pos = pygame.Vector2(260, 350)
 walls = np.zeros((720, 1280), dtype=bool)
 walls[:, 300] = True
-game.update(.4, {}, walls)
+update_board(game, .4, {}, walls)
 assert game.players[1].pos.x < 282 and game.players[1].state == "canoe" and not game.events
 
 # Destroying barrels/asteroids yields all three randomly ordered weapon types.
@@ -236,7 +243,7 @@ for prop in game.props:
 assert {pickup.kind for pickup in game.pickups} == {"laser", "jouster", "mine"}
 assert all(prop.hp <= 0 for prop in game.props)
 assert not game.events, "Damaging scenery must not squeeze a player's controller"
-game.update(0, {}, np.zeros((720, 1280), dtype=bool))
+update_board(game, 0, {}, np.zeros((720, 1280), dtype=bool))
 assert all(prop.hp <= 0 for prop in game.props), "Live camera updates must not restore destroyed objects"
 
 # Pickups drift and bounce; collecting and activating use separate actions.
@@ -244,7 +251,7 @@ game = arena((1,))
 walls = np.zeros((720, 1280), dtype=bool)
 walls[:, 300] = True
 game.pickups = [Pickup("laser", pygame.Vector2(280, 200), pygame.Vector2(100, 0), 10)]
-game.update(.5, {}, walls)
+update_board(game, .5, {}, walls)
 assert game.pickups[0].pos.x < 290
 game.pickups[0].pos = game.players[1].pos.copy()
 game.pickups[0].velocity.update(0, 0)
@@ -289,7 +296,7 @@ game.players[2].pos = pygame.Vector2(550, 350)
 game.mines = [Mine(1, pygame.Vector2(500, 350), 9)]
 walls = np.zeros((720, 1280), dtype=bool)
 walls[:, 525] = True
-game.update(.7, {}, walls)
+update_board(game, .7, {}, walls)
 assert game.players[2].state == "canoe" and game.mines
 assert not game.events, "A mine blocked by cover must not squeeze the protected player"
 
@@ -330,7 +337,7 @@ assert game.players[1].speed == config["game"]["beaver_speed"]
 # The complete renderer does not project dark ink or laser-red placeholder pixels.
 game = Game(config)
 game.new_match([1, 2])
-game.update(.1, {}, drawing(log_outline, rock_outline))
+update_board(game, .1, {}, drawing(log_outline, rock_outline))
 surface = pygame.Surface((1280, 720))
 game.draw(surface)
 pixels = pygame.surfarray.array3d(surface)
@@ -353,4 +360,20 @@ for offset in ((-100, 0), (0, -100), (100, 0), (0, 100)):
 print('Responsive heading check passed: reversals finish in one physics step')
 
 pygame.quit()
-print("Game checks passed: movement, ammo, lives, feedback, rounds, live walls, closed-shape fills, every weapon and hazard, rendering")
+print("Game checks passed: movement, ammo, lives, feedback, rounds, explicit wall replacement, closed-shape fills, every weapon and hazard, rendering")
+
+# Restored shape contours may extend one pixel beyond any image edge.
+edge_game = arena()
+edge_ink = np.zeros((720, 1280), dtype=bool)
+edge_ink[100:104, 1180:1280] = True
+outside = np.array([[1280, 100], [-1, 100], [500, -1], [500, 720]], dtype=np.int32).reshape(-1, 1, 2)
+edge_shape = Shape('rock', outside, (640, 360), 0, 1)
+sticks, loose = edge_game.find_sticks(edge_ink, [edge_shape])
+assert len(sticks) == 1, 'Off-board negative points must not label ink on the opposite edge'
+assert np.array_equal(loose, edge_ink)
+for left, top, right, bottom in ((0, 200, 150, 350), (1129, 200, 1279, 350),
+                                  (500, 0, 650, 150), (500, 569, 650, 719)):
+    board = np.zeros((720, 1280), np.uint8)
+    cv2.rectangle(board, (left, top), (right, bottom), 1, 3)
+    update_board(edge_game, 1 / 60, {}, board.astype(bool))
+print('Geometry accepts contours beyond all four camera edges without wrapping or crashing')

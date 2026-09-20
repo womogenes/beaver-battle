@@ -1,7 +1,7 @@
 """Latest-frame UVC capture, planar calibration, physical walls, and red aims.
 
 Preview arrays are BGR camera pixels. Aims and walls use logical display pixels.
-No camera control (exposure, gain, white balance) is changed by this module.
+Exposure changes only when camera.exposure_us is explicitly configured for V4L2.
 """
 
 import platform
@@ -51,13 +51,20 @@ def capture_backend(name=""):
 
 def open_capture(config):
     camera = config.get("camera", {})
-    capture = cv2.VideoCapture(camera.get("device", 0), capture_backend(camera.get("backend", "")))
+    backend = capture_backend(camera.get("backend", ""))
+    capture = cv2.VideoCapture(camera.get("device", 0), backend)
     if capture.isOpened():
         capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera.get("width", 1280)))
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera.get("height", 720)))
         capture.set(cv2.CAP_PROP_FPS, float(camera.get("fps", 30)))
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if camera.get("exposure_us") is not None:
+            if backend != cv2.CAP_V4L2:
+                print("camera.exposure_us is only supported for V4L2; leaving exposure unchanged", flush=True)
+            elif not (capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) and
+                      capture.set(cv2.CAP_PROP_EXPOSURE, float(camera["exposure_us"]) / 100)):
+                print("Camera rejected configured manual exposure; check its controls", flush=True)
     return capture
 
 
@@ -292,7 +299,11 @@ def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WA
     size = max(3, int(stroke) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
     relief = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
-    solid = gray < int(threshold)
+    # A fixed cutoff must never classify a dim but blank board as solid ink.
+    # Sample the field cheaply; local contrast still handles individual strokes.
+    background = float(np.percentile(gray[::8, ::8], 75))
+    absolute = min(float(threshold), background * 0.35)
+    solid = gray < absolute
     strong = (relief >= int(contrast)) | solid
     if faint is None or int(faint) >= int(contrast):
         return strong
@@ -372,6 +383,9 @@ def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
     expected = cv2.GaussianBlur(expected_board(reference, gain, canvas), (0, 0), blur)
     observed = cv2.GaussianBlur(warped.astype(np.float32), (0, 0), blur)
     difference = expected - observed
+    # A global ambient-light shift is not a local physical obstacle. Use robust
+    # per-channel offsets so a smaller hand/shadow remains a residual deficit.
+    difference -= np.median(difference[::8, ::8], axis=(0, 1))
     blue, green, red = cv2.split(difference)
     deficit = cv2.max(cv2.max(blue, green), red)
     mask = (deficit > float(threshold)).astype(np.uint8)
@@ -476,7 +490,13 @@ class LaserTracker:
             elapsed = max(0.0, timestamp - track.timestamp)
             prediction = track.position + track.velocity * min(elapsed, 0.1)
             gate = min(self.max_gate, 24.0 + self.max_speed * elapsed)
-            distances = np.linalg.norm(locations - prediction, axis=1)
+            predicted_distances = np.linalg.norm(locations - prediction, axis=1)
+            observed_distances = np.linalg.norm(locations - track.position, axis=1)
+            # A hand can reverse immediately. Velocity predicts the next observation,
+            # but must not veto a dot still within the physical displacement gate.
+            # Taking the lower cost also keeps conflicting stationary/moving
+            # assignments ambiguous instead of trusting stale velocity at a turn.
+            distances = np.minimum(predicted_distances, observed_distances)
             choices[player_id] = [int(index) for index in np.flatnonzero(distances <= gate)]
             costs[player_id] = distances ** 2
         players = list(active)
@@ -549,6 +569,9 @@ class Vision:
     survey_votes: np.ndarray | None = field(default=None, init=False)
     survey_samples: int = field(default=0, init=False)
     survey_until: float = field(default=0.0, init=False)
+    survey_start: float = field(default=0.0, init=False)
+    survey_duration: float = field(default=3.0, init=False)
+    survey_reference: np.ndarray | None = field(default=None, init=False)
     board_gain: np.ndarray | None = field(default=None, init=False)
     projections: deque = field(default_factory=lambda: deque(maxlen=16), init=False)
     walls: np.ndarray | None = field(default=None, init=False)
@@ -559,17 +582,17 @@ class Vision:
     capture_error: str = field(default="", init=False)
 
     def begin_survey(self, seconds=3.0):
-        """Read the board for a while and keep what was there most of the time.
-
-        Deciding the geometry afresh ten times a second makes a marginal stroke flicker,
-        and one pixel at a repair takes a whole enclosure with it, so the board appeared
-        to shade itself in and out while nobody touched it. A vote over a few seconds
-        settles that before anyone is playing on it.
-        """
+        """Sample physical ink under a blank white projection before a match."""
         with self.lock:
+            self.calibration_generation += 1
+            self.wall_job = None
             self.survey_votes = None
+            self.survey_reference = None
             self.survey_samples = 0
-            self.survey_until = monotonic() + max(0.1, float(seconds))
+            self.survey_duration = max(0.1, float(seconds))
+            self.survey_start = monotonic() + 0.5
+            self.survey_until = self.survey_start + self.survey_duration
+            self.wall_resume = self.survey_start
 
     def surveying(self):
         with self.lock:
@@ -580,7 +603,7 @@ class Vision:
             if self.survey_until <= 0.0:
                 return 1.0
             left = self.survey_until - monotonic()
-            total = max(0.1, float(self.config.get("camera", {}).get("survey_seconds", 3.0)))
+            total = self.survey_duration
             return float(min(1.0, max(0.0, 1.0 - left / total)))
 
     def set_projection(self, canvas, timestamp=None):
@@ -925,6 +948,8 @@ class Vision:
         rate = float(camera.get("wall_update_hz", 10))
         # A zero rate keeps the calibration scan. One pending wall job replaces older
         # work, just like capture: expensive geometry never queues a camera backlog.
+        if self.surveying():
+            rate = max(10.0, rate)
         if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:
             job = (frame, timestamp, self.matrix, self.board_reference, self.board_gain,
                    self.projection_for(timestamp), generation)
@@ -968,11 +993,16 @@ class Vision:
             if (generation != self.calibration_generation or self.calibration_requested.is_set()
                     or matrix is not self.matrix):
                 return
+            survey = self.survey_until > 0.0
+            if survey and timestamp < self.survey_start:
+                return
         width, height = self.dimensions()
         warped = cv2.warpPerspective(frame, matrix, (width, height), borderValue=(255, 255, 255))
-        predicted = canvas is not None and reference is not None and gain is not None
+        predicted = not survey and canvas is not None and reference is not None and gain is not None
         # Ink only reads red, so do not restore two unused full-resolution channels.
         surface = under_white(warped[:, :, 2], gain[2], canvas[:, :, 2]) if predicted else warped
+        # A blank survey has no calibration markers to remove: retain physical
+        # ink even where marker squares used to be projected.
         dark = ink_mask(surface, *self.ink_settings())
         if predicted:
             dark = dark | obstacles(warped, reference, gain, canvas, *self.obstacle_settings())
@@ -985,14 +1015,26 @@ class Vision:
                 if self.survey_votes is None or self.survey_votes.shape != dark.shape:
                     self.survey_votes = np.zeros(dark.shape, np.int32)
                     self.survey_samples = 0
+                    self.survey_reference = np.zeros(warped.shape, np.float32)
                 self.survey_votes += dark
+                self.survey_reference += warped
                 self.survey_samples += 1
                 if timestamp >= self.survey_until and self.survey_samples >= 3:
-                    share = float(self.config.get("camera", {}).get("survey_share", 0.45))
-                    settled = self.survey_votes >= max(1, int(self.survey_samples * share))
+                    share = float(self.config.get("camera", {}).get("survey_share", 0.5))
+                    threshold = max(self.survey_samples // 2 + 1, int(np.ceil(self.survey_samples * share)))
+                    settled = self.survey_votes >= threshold
+                    self.wall_filter = WallFilter(int(self.config.get("camera", {}).get("wall_persistence", 3)))
                     self.walls = self.wall_filter.seed(settled)
+                    self.board_reference = self.survey_reference / self.survey_samples
+                    # White-only sampling cannot infer a new projector gain. Keep
+                    # the marker-derived gain for other modes under this calibration.
+                    self.projections.clear()
+                    previous = self.latest
+                    self.latest = VisionSnapshot(previous.timestamp, previous.aims, previous.confidence,
+                                                 self.walls, previous.preview, previous.calibrated, previous.error)
                     self.survey_until = 0.0
                     self.survey_votes = None
+                    self.survey_reference = None
                 elif self.walls is None:
                     self.walls = self.wall_filter.update(dark)
             else:

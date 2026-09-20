@@ -4,6 +4,24 @@
 
 A projection-mapped canoe battle for two or three red-laser controllers. Python runs the game, USB camera, calibration, and UDP networking. ESP-IDF C runs the two buttons, laser output, and servo feedback on each ESP32 DevKit V1.
 
+## Production on the Linux projector laptop
+
+```sh
+cd /home/willi/coding/hackmit_2026
+./scripts/run-prod.sh
+```
+
+This starts one receiver relay and one fullscreen game, calibrates the camera,
+and stops both when either exits. Ctrl+C shuts the pair down. Duplicate launches
+are rejected before opening hardware, including direct game/relay launches.
+Use `BEAVER_RECEIVER=/dev/ttyUSB1` or `BEAVER_DISPLAY=0` only when those device
+assignments differ. Do not run a second relay beside this launcher.
+
+For live diagnostics, append `--diagnostics-dir /tmp/beaver-live`; camera.jpg,
+walls.png and status.json update once per second. A V4L2-only local setting
+`camera.exposure_us` reapplies explicit manual exposure after USB reconnects.
+It is room-specific: recalibrate after changing camera exposure or rig position.
+
 ## Run now, without hardware
 
 Plain `uv run python -m beaver_battle` works with or without the hardware: it listens for the laser controllers, and while none is connected the mouse steers player 1, the keyboard works the menus, and bots fill the other canoes; as soon as a controller connects, the lasers take over, and the lowest controller's dot hovers the menus in place of the trackpad. `--simulate` does the same without ever opening the camera or the network port.
@@ -125,8 +143,8 @@ in the pause menu too.
 
 Player hit feedback uses the bidirectional ESP-IDF receiver and controller firmware
 (see [firmware instructions](docs/firmware.md)). Each accepted damaging hit targets
-that player's D33 servo. The reduced-load trial ramps 990 → 675 → 990 µs in
-10 µs steps every 20 ms, holds for 100 ms, then disables idle PWM. Both mechanisms
+that player's D33 servo. The full-speed cycle commands 990 → 570 → 990 µs with
+500 ms per phase, then disables idle PWM. Both mechanisms
 use the user-confirmed endpoints. Repeated packets never repeat a squeeze; hits during
 a running cycle or its two-second cooldown are consumed without queuing. Buttons keep
 their normal laser/game functions. Older Arduino builds must be reflashed for feedback.
@@ -138,3 +156,7 @@ expires on disconnect, timeout, or a menu change; it never clicks a stored old a
 
 In Beaver Battle, hold button 1 to aim and tap button 2 for one shot (or to use
 a collected power-up). Neither held button produces automatic rock firing.
+
+Beaver Battle captures collision geometry when a match starts and keeps it fixed
+for the whole match. Laser positions continue updating live; start a new match
+to capture changed drawings.

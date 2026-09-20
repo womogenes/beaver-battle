@@ -64,7 +64,7 @@ new ESP-NOW feedback mode.
 In ESP-NOW mode, lease expiry cancels the servo cycle to rest but leaves local FIRE
 laser gating active. A positive duration_ms requests the fixed three-stage cycle.
 
-Reduced-load trial: ESP-NOW now requests 75% of the calibrated travel (990→675→990
-µs here), ramped in 10 µs steps no faster than every 20 ms, with a 100 ms squeeze
-hold. PWM stops after return settling, and starts disabled on boot. This supersedes
-the fixed three-stage timing above without changing command keys or deduplication.
+The reduced-load trial has been reverted: ESP-NOW uses the full calibrated
+990→570→990 µs cycle with immediate targets and 500 ms per phase. PWM stops
+after return settling and starts disabled on boot. Command keys, cooldown,
+and deduplication are unchanged.

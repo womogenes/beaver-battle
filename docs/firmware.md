@@ -491,15 +491,14 @@ reported zero dropped packets and send failures. This verifies radio delivery an
 firmware PWM targets, not measured shaft travel or water dispensing. Controller 1
 radio input was observed after flashing; its physical squeeze remains to be observed.
 
-## Reduced-load squeeze trial
+## Full-speed squeeze restored
 
-The ESP-NOW game profile now uses 75% of calibrated travel: 990 → 675 → 990 µs
-for the current mechanisms. It advances at most 10 µs every 20 ms, holds the
-squeeze for 100 ms, and returns at the same rate. Late loop ticks do not make
-larger catch-up jumps. PWM is disabled at boot and after the return settles,
-so there is no commanded idle holding torque. The original endpoint-calibration
-bench sequence is unchanged. These settings supersede the full-travel 500 ms
-phase profile above; actual dispensing and brownout prevention need a loaded test.
+The game uses the full calibrated 990 → 570 → 990 µs motion again, with
+500 ms per phase and immediate target changes (no software slew limiting).
+The reduced-load trial did not dispense reliably. PWM remains disabled at boot
+and after return settles. Cooldown, duplicate suppression, and radio lease
+cancellation remain active. Full-speed loaded operation can still brown out an
+undersized supply.
 
 Beaver Battle freezes combat during a missing controller's three-second reconnect
 grace period, then resumes automatically if it returns. It still clears stale

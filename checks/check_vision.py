@@ -125,7 +125,13 @@ def check_ink():
     bright = cv2.cvtColor(np.full((height, width), 190, np.uint8), cv2.COLOR_GRAY2BGR)
     assert not ink_mask(bright).any(), "A blank bright board holds no ink"
     dark_room = cv2.cvtColor(np.full((height, width), 40, np.uint8), cv2.COLOR_GRAY2BGR)
-    assert ink_mask(dark_room).all(), "The absolute cutoff still covers areas wider than the kernel"
+    assert not ink_mask(dark_room).any(), "A uniformly dim board is not solid ink"
+    for level in (8, 15, 40, 100, 200):
+        dim = np.full((height, width, 3), level, np.uint8)
+        dim[200:400, 400:600] = 0
+        detected = ink_mask(dim)
+        assert detected[250:350, 450:550].all(), "Wide dark ink remains solid"
+        assert detected.mean() < .06, "Blank field must not flood at any brightness"
     red = np.zeros((height, width, 3), np.uint8)
     red[:, :, 2] = 255
     assert not ink_mask(red).any(), "Saturated red stays reserved for laser dots"
@@ -199,6 +205,10 @@ def check_obstacles():
     lit = expected_board(reference, gain, canvas)
     assert not obstacles(lit.astype(np.uint8), reference, gain, canvas).any(), \
         "Projected artwork is predicted away, however dark it is drawn"
+
+    for offset in (-80, -40, 40):
+        changed = np.clip(lit + offset, 0, 255).astype(np.uint8)
+        assert not obstacles(changed, reference, gain, canvas).any(), 'Ambient change must not flood obstacles'
 
     # A hand blocks the beam over part of that art and reflects less than the board.
     shadowed = lit.copy()
@@ -348,6 +358,37 @@ def check_identity():
     assert crossing.update([(145, 100), (95, 100)], 3.0)[0] == {}, "Stale identities cannot reacquire from motion"
 
 
+def check_blank_survey():
+    width, height = 320, 180
+    vision = Vision({"display": {"width": width, "height": height}})
+    vision.matrix = np.eye(3)
+    blank = np.full((height, width, 3), 200, np.uint8)
+    ink = blank.copy()
+    ink[75:85, 120:200] = 10
+    noisy = ink.copy()
+    noisy[100:110, 120:200] = 10
+    old = np.ones((height, width), bool)
+    vision.walls = vision.wall_filter.seed(old)
+    with patch("beaver_battle.vision.monotonic", return_value=10.0):
+        vision.begin_survey(0.3)
+    generation = vision.calibration_generation
+    reference = np.full(blank.shape, 250, np.float32)
+    gain = np.array([200, 200, 200], np.float32)
+    canvas = np.zeros(blank.shape, np.uint8)
+    vision.board_gain = gain
+    vision.process_walls(noisy, 10.2, vision.matrix, reference, gain, canvas, generation)
+    assert vision.survey_samples == 0, "Projected menu frames must settle before scanning"
+    vision.process_walls(noisy, 10.5, vision.matrix, reference, gain, canvas, generation - 1)
+    assert vision.survey_samples == 0, "Old in-flight work cannot enter a new survey"
+    for frame, timestamp in ((noisy, 10.5), (ink, 10.6), (ink, 10.81)):
+        vision.process_walls(frame, timestamp, vision.matrix, reference, gain, canvas, generation)
+    assert not vision.surveying()
+    assert vision.walls[80, 150] and not vision.walls[105, 150], "Majority keeps ink and rejects transient noise"
+    assert vision.latest.walls is vision.walls, "Completed walls publish before survey completion is exposed"
+    assert vision.board_gain is gain and vision.board_reference is not None
+    assert vision.walls.mean() < 0.05, "Stale menu compensation must not enter the blank-board scan"
+
+
 def check_fast_tracking():
     # Keep two identities well separated vertically while they sweep and reverse.
     def seeded_tracker(**settings):
@@ -375,8 +416,13 @@ def check_fast_tracking():
 
     abrupt = seeded_tracker(max_speed=3000)
     abrupt.update(points, 1 + 1 / 30)
-    assert abrupt.update([(100, 100), (100, 500)], 1 + 2 / 30)[0] == {}, \
-        "An instantaneous reversal outside the prediction gate safely loses tracking"
+    assert abrupt.update([(100, 100), (100, 500)], 1 + 2 / 30)[0] == {1: (100, 100), 2: (100, 500)}, \
+        "An instantaneous reversal within the displacement gate retains identities"
+    for index, x in enumerate((200, 100, 200, 100, 200, 100), 3):
+        assert abrupt.update([(x, 500), (x, 100)], 1 + index / 30)[0] == {1: (x, 100), 2: (x, 500)}, \
+            "Repeated sharp turns must not require stationary frames to reacquire"
+    assert abrupt.update([(600, 100), (600, 500)], 1 + 9 / 30)[0] == {}, \
+        "A physically implausible jump still invalidates identities"
 
     for settings in ({}, {"laser_max_speed": 3000, "laser_max_gate": 150}):
         vision = Vision({"camera": settings})
@@ -738,11 +784,12 @@ check_candidates()
 check_laser_on_a_whiteboard()
 check_identity()
 check_fast_tracking()
+check_blank_survey()
 check_walls()
 check_early_aims()
 check_wall_worker()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, laser dot on a whiteboard, drawn ink by pen colour, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, laser dot on a whiteboard, drawn ink by pen colour, blank-board survey, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")

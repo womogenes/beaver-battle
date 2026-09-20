@@ -154,7 +154,20 @@ def stroke_ends(ink, look=15, min_branch=25):
     right = min(ink.shape[1], left + width + pad)
     bottom = min(ink.shape[0], top + height + pad)
     left, top = max(0, left - pad), max(0, top - pad)
-    ends = stroke_ends_patch(ink[top:bottom, left:right], look, min_branch)
+    patch = ink[top:bottom, left:right]
+    # Broad filled objects/shadows are not broken pen strokes. Their skeleton
+    # costs hundreds of thinning passes and contributes no useful repair tips.
+    distance = cv2.distanceTransform(patch.astype(np.uint8), cv2.DIST_L2, 3)
+    thick = distance > max(12, look * 2)
+    if thick.any():
+        count, labels = cv2.connectedComponents(patch.astype(np.uint8), connectivity=8)
+        keep = np.ones(count, dtype=bool)
+        keep[0] = False
+        keep[np.unique(labels[thick])] = False
+        patch = keep[labels].astype(np.uint8)
+        if not patch.any():
+            return []
+    ends = stroke_ends_patch(patch, look, min_branch)
     return [((x + left, y + top), heading) for (x, y), heading in ends]
 
 
@@ -276,7 +289,7 @@ def link_strokes_patch(ink, reach, min_piece, thickness, record):
     owner = np.zeros(int(nearest.max()) + 1, np.int32)
     ys, xs = np.nonzero(ink)
     owner[nearest[ys, xs]] = pieces[ys, xs]
-    narrowest = np.full(count * count, np.inf, np.float32)
+    pair_keys, pair_widths = [], []
     for sideways in (True, False):
         if sideways:
             left, right = owner[nearest[:, :-1]], owner[nearest[:, 1:]]
@@ -289,9 +302,15 @@ def link_strokes_patch(ink, reach, min_piece, thickness, record):
             continue
         low = np.minimum(left[split], right[split]).astype(np.int64)
         high = np.maximum(left[split], right[split]).astype(np.int64)
-        np.minimum.at(narrowest, low * count + high, width[split])
-    channel = {(int(key // count), int(key % count)): float(narrowest[key])
-               for key in np.nonzero(np.isfinite(narrowest))[0]}
+        pair_keys.append(low * count + high)
+        pair_widths.append(width[split])
+    if not pair_keys:
+        return ink
+    keys, inverse = np.unique(np.concatenate(pair_keys), return_inverse=True)
+    narrowest = np.full(len(keys), np.inf, np.float32)
+    np.minimum.at(narrowest, inverse, np.concatenate(pair_widths))
+    channel = {(int(key // count), int(key % count)): float(value)
+               for key, value in zip(keys, narrowest)}
     if not channel:
         return ink
     wanted = set(index for pair in channel for index in pair
@@ -327,6 +346,16 @@ def link_strokes_patch(ink, reach, min_piece, thickness, record):
     return bridged.astype(bool)
 
 
+def interior_ink(walls):
+    """Ink disconnected from the projection boundary, for enclosure inference."""
+    count, labels = cv2.connectedComponents(walls.astype(np.uint8), connectivity=8)
+    boundary = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+    keep = np.ones(count, dtype=bool)
+    keep[boundary] = False
+    keep[0] = False
+    return keep[labels]
+
+
 def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
     """Find regions enclosed by ink. Returns (ink plus interiors, shapes).
 
@@ -349,7 +378,11 @@ def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
     Regions touching the board edge are open water, and enclosures above max_area stay
     hollow so an arena outline cannot turn the whole board solid.
     """
-    ink = walls.astype(np.uint8)
+    # The projection boundary can be detected as a broken rectangular stroke.
+    # Growing it closes gaps around unrelated drawings and invents enormous islands.
+    # Edge-connected ink is an open boundary, never evidence for a filled enclosure;
+    # retain the original walls below so this does not erase collision strokes.
+    ink = interior_ink(walls).astype(np.uint8)
     distance = cv2.distanceTransform((ink == 0).astype(np.uint8), cv2.DIST_L2, 3)
     interior = np.zeros_like(ink)
     accepted = np.zeros_like(ink)
@@ -429,6 +462,7 @@ class Game:
     walls: np.ndarray | None = None
     wall_distance: np.ndarray | None = None
     wall_source: np.ndarray | None = None
+    match_walls: np.ndarray | None = None
     wall_masks: dict[int, np.ndarray] = field(default_factory=dict)
     sprites: dict[str, pygame.Surface] = field(default_factory=dict)
     fonts: dict[int, pygame.font.Font] = field(default_factory=dict)
@@ -447,6 +481,7 @@ class Game:
     sticks: list = field(default_factory=list)
     loose_ink: np.ndarray | None = None
     pads: list = field(default_factory=list)
+    geometry: object = None
 
     def setting(self, name, default):
         return self.config.get("game", {}).get(name, default)
@@ -459,6 +494,8 @@ class Game:
         self.height = int(self.setting("height", 720))
         self.scale = min(self.width / 1280, self.height / 720)
         self.shore = 0
+        if self.geometry is not None:
+            self.geometry.reset()
         self.art.clear()
         self.rng = random.Random(self.setting("seed", 2026))
         self.scores = dict.fromkeys(ids, 0)
@@ -481,7 +518,8 @@ class Game:
             path = directory / f"{kind}.png"
             if path.is_file():
                 self.sprites[kind] = pygame.image.load(path)
-        self.replace_walls(walls)
+        self.match_walls = None if walls is None else walls.copy()
+        self.replace_walls(self.match_walls)
         self.new_round()
 
     def new_round(self):
@@ -530,6 +568,11 @@ class Game:
         self.resolve_walls()
 
     def replace_walls(self, walls):
+        if self.geometry is not None:
+            return self.geometry.update(self, walls)
+        return self.build_walls(walls)
+
+    def build_walls(self, walls):
         if walls is self.wall_source:
             return False
         if walls is not None and (walls.shape != (self.height, self.width) or walls.dtype != np.bool_):
@@ -542,7 +585,10 @@ class Game:
             # made of it, so repair the stroke before anything else reads the geometry.
             thickness = max(1, round(self.setting("stroke_width", 3) * self.scale))
             found = []
-            ink = link_strokes(walls, round(self.setting("stroke_link", 40) * self.scale),
+            # Do this before repair: a long bridge to the projection border can
+            # otherwise attach a legitimate closed drawing to that false boundary.
+            original = walls
+            ink = link_strokes(interior_ink(walls), round(self.setting("stroke_link", 40) * self.scale),
                                round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
                                thickness, record=found)
             # Then carry any free end on, which reaches breaks that connectivity cannot see.
@@ -553,6 +599,8 @@ class Game:
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,
                                           self.setting("shape_closure", .70))
+            walls = walls | original
+            ink = ink | original
         for shape in shapes:
             # Camera jitter must not flip a fill between log and rock or wobble its grain.
             for old in self.shapes:
@@ -609,6 +657,12 @@ class Game:
         outlines = set()
         for shape in shapes:
             points = shape.contour.reshape(-1, 2)
+            # Restoring a dilated outline can extend beyond the camera canvas.
+            # Only actual image pixels have component labels; negative indices
+            # would otherwise silently sample the opposite edge.
+            inside = ((points[:, 0] >= 0) & (points[:, 0] < labels.shape[1]) &
+                      (points[:, 1] >= 0) & (points[:, 1] < labels.shape[0]))
+            points = points[inside]
             outlines.update(int(label) for label in labels[points[:, 1], points[:, 0]] if label)
         sticks = []
         for label in range(1, count):
@@ -849,8 +903,12 @@ class Game:
         self.events = []
         del self.sounds[:-32]
         del self.fx[:-64]
-        if walls is not None and self.replace_walls(walls):
+        # Poll preparation of the start-of-match scan; live camera noise must not
+        # change collision geometry during a match. Lasers still update independently.
+        if self.match_walls is not None and self.replace_walls(self.match_walls):
             self.resolve_walls()
+        if self.match_walls is not None and self.wall_source is not self.match_walls:
+            return self.events  # Initial geometry is still preparing; do not spawn into unknown walls.
         if self.blocked or self.phase == "match_over":
             return self.events
         controls = inputs if isinstance(inputs, dict) else {item.player_id: item for item in inputs}

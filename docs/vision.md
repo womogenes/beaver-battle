@@ -215,3 +215,73 @@ A paired 25-sample sparse-board geometry benchmark reduced median collision
 geometry rebuild time from 90.54 to 50.44 ms (p90 98.68 to 53.68 ms). Dense ink
 can still require nearly the whole board; this optimization preserves the full
 search margins rather than changing which gaps become solid.
+
+### Dim-scene geometry stall fix (2026-09-20)
+
+A live underexposed image marked roughly 65% of the board as ink, sending broad
+filled regions into iterative stroke thinning on the game thread. The absolute
+ink cutoff is now capped at 35% of the sampled 75th-percentile red intensity;
+local contrast detection remains active. Uniform dim fields therefore do not
+become solid walls merely because their brightness falls below a room-specific
+constant. Checks cover blank fields and broad black ink at five light levels.
+
+Stroke endpoint repair excludes connected regions containing an interior wider
+than 60 pixels at the standard look setting. Their original collision ink is
+preserved; only speculative gap repair is skipped. Thin independent strokes
+still receive endpoint repair. This avoids expensive thinning of a filled board,
+without turning a physical obstacle into traversable space.
+
+The current room required a temporary manual exposure of 300 (nominally 30 ms)
+instead of the earlier room's 100. Recalibration at that exposure reduced the
+observed mask to about 7%. This is a room-specific hardware adjustment, not an
+automatic exposure policy or proof of robust tracking in every environment;
+longer exposure can increase motion blur. Recheck it after reconnecting the camera.
+
+### Live geometry and changing illumination
+
+Real-camera Beaver Battle copies the board scan at match start and prepares its
+collision geometry in a background worker. Physics waits for that initial geometry
+without blocking rendering. The same board is retained through every round of the
+match; subsequent camera noise, shadows and new drawings do not change it. Starting
+a new match takes a fresh scan and invalidates pending results. Laser tracking
+continues live throughout. Simulation and small geometry checks remain synchronous.
+Connected-component linking stores only neighboring component pairs, rather than
+allocating a square matrix for every speck of camera noise.
+
+Projected frames are handed to vision in menus as well as gameplay, so menu text
+and buttons can be subtracted instead of learned as ink. Obstacle residuals subtract
+a robust per-channel whole-frame brightness offset before detecting local shadows.
+Checks cover uniform ambient shifts, preserved local hand shadows, dark fields,
+edge contours, slow geometry and thousands of isolated noise components. These
+are bounded robustness checks, not proof under every lighting condition.
+
+`--diagnostics-dir /tmp/beaver-live` writes the latest camera image, wall mask and
+status (FPS, calibration, connected controllers and aim positions) once per second.
+`camera.exposure_us` is optional, local and V4L2-only; camera open/reconnect reapplies
+it. Unsupported backends or rejected controls report a warning rather than guessing
+another backend's exposure units. Changing exposure still requires recalibration.
+
+On the current Linux/Arducam setup, a 20-second real-camera bot match after these
+changes completed 1,031 rendered frames (about 52 FPS), with live ink fraction
+around 3% and no geometry stall. Both controllers were connected during the
+subsequent production run. Duplicate production, relay and game launches were
+physically attempted and rejected without disturbing the original processes.
+V4L2 manual exposure enum 1 and exposure value 300 were accepted and read back.
+Lighting-transition and moving-laser validation still require physical tests.
+
+The fixed match scan now uses a blank white projection, a 0.5-second settling
+period, and three seconds of strict-majority ink voting. Scanning starts after
+both players ready and repeats on replay; no title, status text, or pointer rings
+are projected during it. Old in-flight wall jobs are rejected by generation.
+This avoids freezing menu artwork into the match's physical geometry.
+
+Camera diagnostics also save `match-ink.png` (the frozen input) and
+`match-solid.png` (the collision geometry). Compare these rather than assuming
+`walls.png`, the current live detection, is the mask used by a static match.
+
+Projection-edge fragments are excluded from stroke repair and enclosure inference,
+but their original collision pixels remain. A captured failure previously produced
+five filled shapes and 55.7% solid coverage; replay after this fix retained the three
+physical closed drawings at 6.2%. A fresh 14-second camera match showed no giant
+edge islands and completed 832 frames without a crash. Drawings connected directly
+to the projection boundary retain their strokes but are not inferred as solid fills.

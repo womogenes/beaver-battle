@@ -76,6 +76,26 @@ def check_edge_and_size_limits():
     assert int(filled.sum()) < MAX_AREA
 
 
+def check_projection_boundary():
+    """A camera's broken projection outline must not inflate into giant islands."""
+    from beaver_battle.game import Game
+    board = blank()
+    cv2.rectangle(board, (0, 0), (WIDTH - 1, HEIGHT - 1), 1, 5)
+    board[80:160, :8] = 0
+    board[220:300, -8:] = 0
+    cv2.rectangle(board, (350, 250), (485, 350), 1, 5)
+    cv2.circle(board, (910, 275), 45, 1, 5)
+    cv2.rectangle(board, (830, 430), (975, 505), 1, 5)
+    cv2.line(board, (675, 160), (665, 510), 1, 5)
+    cv2.polylines(board, [np.int32([[350, 415], [335, 570], [510, 560]])], False, 1, 5)
+    game = Game({'game': {'shape_closure': CLOSURE, 'stroke_mend': MEND}})
+    game.width, game.height, game.scale = WIDTH, HEIGHT, 1
+    game.build_walls(board.astype(bool))
+    assert len(game.shapes) == 3, 'Only the actual closed drawings may become solid'
+    assert game.walls.mean() < .1, 'Projection edges must not grow into giant filled islands'
+    assert game.walls[board.astype(bool)].all(), 'Boundary filtering must preserve collision ink'
+
+
 def pieces(mask):
     count, _ = cv2.connectedComponents(np.asarray(mask).astype(np.uint8), connectivity=8)
     return count - 1
@@ -210,8 +230,32 @@ check_everything_solid_is_drawn()
 check_gap_is_judged_against_size()
 check_filled_body_is_solid()
 check_edge_and_size_limits()
+check_projection_boundary()
 check_cropped_geometry()
 check_cost()
 print(f"Shape checks passed: {len(CASES)} whiteboard cases, broken strokes rejoined, "
       "everything solid is drawn, gap judged against shape size, solid fills, "
       "edge and size limits, cost")
+
+# Broad filled regions retain collision ink but must not trigger expensive thinning.
+from unittest.mock import patch
+solid = np.ones((HEIGHT, WIDTH), np.uint8)
+with patch.object(cv2.ximgproc, 'thinning', side_effect=AssertionError('Thinning a filled board')):
+    assert stroke_ends(solid) == []
+mixed = blank()
+cv2.rectangle(mixed, (20, 20), (400, 400), 1, -1)
+cv2.line(mixed, (600, 450), (850, 450), 1, 3)
+assert len(stroke_ends(mixed)) == 2, 'Separate thin strokes still supply repair ends'
+assert mixed[100, 100] == 1, 'Repair filtering must not erase filled collision geometry'
+print('Dense-mask repair avoids thinning solid regions while retaining thin-stroke ends')
+# Thousands of isolated noisy pixels must not allocate a component-count-squared matrix.
+noise = np.zeros((240, 320), np.uint8)
+noise[::4, ::4] = 1
+original_full = np.full
+def bounded_full(shape, *args, **kwargs):
+    assert int(np.prod(shape)) <= noise.size * 4, 'Quadratic component-pair allocation'
+    return original_full(shape, *args, **kwargs)
+with patch.object(np, 'full', bounded_full):
+    cleaned = link_strokes(noise, 10, 40)
+assert np.array_equal(cleaned, noise), 'Noise must not be joined into invented walls'
+print('Noisy component linking uses bounded sparse pair storage')
