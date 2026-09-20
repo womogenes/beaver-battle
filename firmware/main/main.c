@@ -39,7 +39,7 @@ static uint64_t time_ms(void)
 
 static bool servo_enabled(void)
 {
-#if !defined(CONFIG_BB_LASER_BUTTON_TEST) && (defined(CONFIG_BB_SERVO_ENABLED) || defined(CONFIG_BB_SERVO_BUTTON_TEST))
+#if defined(CONFIG_BB_SERVO_BUTTON_TEST) || (!defined(CONFIG_BB_LASER_BUTTON_TEST) && defined(CONFIG_BB_SERVO_ENABLED))
     return true;
 #else
     return false;
@@ -147,12 +147,31 @@ static void laser_button_test(void)
     bool previous_pulse = false;
     uint64_t pulse_started = 0;
     uint64_t next_status_ms = 0;
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+    uint32_t pulse_us = 1500;
+    uint64_t next_step_ms = time_ms() + 20;
+    ESP_LOGI(log_tag, "SERVO GPIO%d: GPIO%d lowers, GPIO%d raises; both/neither hold; limits %d..%d us; step %d us / 20 ms",
+             SERVO_GPIO, FIRE_GPIO, SPECIAL_GPIO, CONFIG_BB_SERVO_TEST_MIN_US,
+             CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+#endif
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; servo disabled; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
+    ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
     ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
     while (true) {
         uint64_t now = time_ms();
         buttons_read(&fire, &special, now);
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+        if (now >= next_step_ms) {
+            next_step_ms = now + 20;
+            uint32_t requested_pulse = servo_jog(pulse_us, fire.pressed, special.pressed,
+                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+            if (requested_pulse != pulse_us) {
+                pulse_us = requested_pulse;
+                servo_pulse(pulse_us);
+                ESP_LOGI(log_tag, "SERVO GPIO%d %" PRIu32 " us", SERVO_GPIO, pulse_us);
+            }
+        }
+#endif
         if (special.pressed && !previous_pulse) {
             pulse_started = now;
         }
