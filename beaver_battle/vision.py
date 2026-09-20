@@ -32,6 +32,9 @@ WALL_THRESHOLD = 75
 WALL_CONTRAST = 20
 WALL_FAINT = 9
 WALL_STROKE = 21
+LASER_RED_MIN = 160
+LASER_REDNESS = 25
+LASER_MERGE = 13
 OBSTACLE_THRESHOLD = 40
 OBSTACLE_MIN_AREA = 900
 PROJECTION_DELAY = 0.12
@@ -214,11 +217,30 @@ def load_calibration(path, camera_shape, display_shape):
     return matrix
 
 
-def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180):
-    """Find red components before warping, preserving small physical laser spots."""
+def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180,
+                     red_min=LASER_RED_MIN, redness_min=LASER_REDNESS, merge=LASER_MERGE):
+    """Find red components before warping, preserving small physical laser spots.
+
+    Redness is the red channel less the stronger of the other two, which is what separates
+    a laser spot from a merely bright one. How high it can go is set by the surface, not
+    the laser: on a whiteboard reading about 160 the dot drives red to 253, essentially
+    clipped, so redness cannot exceed roughly a hundred and in practice measured 29 to 58.
+    A threshold of 60 therefore rejected every real dot while the wooden trim and the pens
+    in the tray, at redness near 100, passed. The board itself is neutral -- measured
+    median -8 and never above 8 -- so the margin below the dot is what there is to use.
+    """
     blue, green, red = cv2.split(frame)
     redness = red.astype(np.int16) - np.maximum(blue, green).astype(np.int16)
-    mask = ((red >= 160) & (redness >= 60)).astype(np.uint8)
+    mask = ((red >= int(red_min)) & (redness >= int(redness_min))).astype(np.uint8)
+    if merge and int(merge) > 1:
+        # One dot arrives as a bright core with speckle around it, and those pieces sit a
+        # few pixels apart: measured, every frame carrying more than one piece had them
+        # within 18 px, which the tracker reads as a merged, unusable spot. Joining them
+        # under the tracker's own ambiguity distance costs nothing, since anything closer
+        # than that could never have been told apart anyway.
+        span = int(merge) | 1
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
     count, labels, stats, centers = cv2.connectedComponentsWithStats(mask, 8)
     points = [centers[index] for index in range(1, count)
               if min_area <= stats[index, cv2.CC_STAT_AREA] <= max_area]
@@ -781,7 +803,10 @@ class Vision:
             return VisionSnapshot(timestamp, MappingProxyType({}), MappingProxyType({}), None,
                                   preview, False, self.calibration_warning or "Calibration required")
         points = laser_candidates(frame, self.matrix, width, height,
-                                  int(camera.get("laser_min_area", 1)), int(camera.get("laser_max_area", 180)))
+                                  int(camera.get("laser_min_area", 1)), int(camera.get("laser_max_area", 180)),
+                                  int(camera.get("laser_red_min", LASER_RED_MIN)),
+                                  int(camera.get("laser_redness", LASER_REDNESS)),
+                                  int(camera.get("laser_merge", LASER_MERGE)))
         aims, confidence = self.tracker.update(points, timestamp, identity, ready_since)
         rate = float(camera.get("wall_update_hz", 10))
         # A zero rate keeps the calibration board scan and stops re-reading under game art.
