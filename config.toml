@@ -35,7 +35,9 @@ laser_min_area = 1
 laser_red_min = 160 # A laser spot drives the red channel near saturation.
 laser_redness = 16 # Red above the stronger of blue/green. Under a white projection the board peaks at 15 and the dot runs about 22.
 laser_merge = 13 # Join pieces of one dot this close, under the tracker's ambiguity limit.
-laser_max_area = 180
+laser_max_area = 300 # Measured on the board, dots run to 210 with a median of 103, so
+# 180 cut through the top of the dot's own range and discarded about five percent of
+# real detections. Nothing else inside the board comes near this size.
 identity_interval = 1.5
 identity_window = 0.18
 identity_settle = 0.08
