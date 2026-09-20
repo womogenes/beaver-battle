@@ -476,7 +476,7 @@ def main():
         sections = (
             ('1  BUILD', (f"The builder has {rules['build_seconds']:g} s to draw a dam across the valley, from bank to bank",
                           'Hold the left button to draw; right click when you are done' if args.simulate else 'Draw it on the whiteboard with a marker',
-                          'A dam has one fixed strength, shared over all its wood: draw more and every piece is weaker',
+                          'One clean wall is the strongest dam: extra or thick wood makes the whole dam weaker and quicker to chew',
                           'Open strokes are sticks and closed shapes are logs. A real gap leaks, and a leak loses at once')),
             ('2  ATTACK', (('The beaver follows the mouse; click or hold next to the wood to chew it' if args.simulate
                             else 'The beaver follows your laser; press a button next to the wood to chew it'),
