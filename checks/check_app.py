@@ -209,6 +209,20 @@ def new_match_same_game(run, state):
         run.done = True
 
 
+def one_controller(run, state):
+    """One working controller and --bot: the computer takes the other number, readies up by itself, and the match
+    runs with both canoes driven, so a demo survives a dead controller."""
+    mode = state['mode']
+    run.game.players = {}  # The stand-in game has no canoes; the bot then simply idles, connected.
+    if mode == 'ready':
+        run.buttons[2] = (False, True)  # The one person presses ready; nobody presses for the bot.
+    if run.stage == 0 and mode == 'lobby' and run.frames >= 3:
+        run.stage = 1
+        return [key(pygame.K_RETURN)]
+    if mode == 'game' and run.game.update.call_count >= 3:
+        run.done = True
+
+
 def laser_pointer(run, state):
     """With a controller connected, its laser dot hovers the menu in place of the trackpad."""
     if state['mode'] == 'lobby' and run.frames >= 3:
@@ -292,6 +306,14 @@ def main():
     again = Scenario(new_match_same_game, active=[], calibrated=False, argv=['beaver-battle', '--no-names', '--game', 'dam']).run()
     assert [mode for mode, elapsed in again.history] == ['dam', 'pause', 'dam'], again.history
 
+    alone = Scenario(one_controller, active=[2], argv=['beaver-battle', '--no-names', '--game', 'battle', '--bot']).run()
+    visited = [mode for mode, elapsed in alone.history]
+    assert visited[0] == 'lobby' and 'ready' in visited and visited[-2:] == ['countdown', 'game'], alone.history
+    assert sorted(alone.game.new_match.call_args.args[0]) == [1, 2], 'the bot fills the missing seat'
+    step, inputs, walls = alone.game.update.call_args.args
+    assert set(inputs) >= {1, 2} and inputs[1].connected and inputs[2].connected, 'both canoes are driven'
+    assert alone.game.names.get(1) == 'BOT', 'the bot took the number the person is not holding'
+
     fallback = Scenario(no_lasers, active=[], calibrated=False)
     fallback.run()
     assert [mode for mode, elapsed in fallback.history][-3:] == ['ready', 'countdown', 'game'], fallback.history
@@ -327,7 +349,7 @@ def main():
     bench.vision.start.assert_called_once()
     assert bench.game.new_match.call_count == 2, 'One startup match plus one built from the board scan'
     assert bench.game.update.call_count > 0, 'Bench must reach live physics without controllers'
-    print('App lifecycle, guarded resume, new match keeps its game, calibration cancellation, mouse fallback without lasers, laser as pointer, '
+    print('App lifecycle, guarded resume, new match keeps its game, one controller plus a bot, calibration cancellation, mouse fallback without lasers, laser as pointer, '
           'bench autostart, and cleanup checks passed.')
 
 

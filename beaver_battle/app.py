@@ -69,6 +69,10 @@ def simulated_walls(width, height):
     return walls | ink.astype(bool)
 
 
+# What the players see each game called. The code keeps its working names: battle, treasure, dam.
+TITLES = {'battle': 'CANOODLING', 'treasure': 'LOG IN', 'dam': 'DAM IT!'}
+
+
 def menu_choices(mode):
     if mode == 'lobby':
         return ['Start match', 'Calibrate board', 'Change game', 'Quit']
@@ -120,6 +124,7 @@ def main():
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2,))
     parser.add_argument('--game', choices=('battle', 'treasure', 'solo', 'dam'), help='go straight to one game instead of the chooser')
+    parser.add_argument('--bot', action='store_true', help='one player: the other is a computer opponent (with --game)')
     parser.add_argument('--no-names', action='store_true', help='skip typing player names before a match')
     parser.add_argument('--mute', action='store_true', help='play no sound effects')
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left boosts swimmers, right fires or uses power-up')
@@ -145,6 +150,7 @@ def main():
     import pygame
     from beaver_battle import sprites
     from beaver_battle.game import Game
+    from beaver_battle.bots import BattleBot, DamBot
     from beaver_battle.dam import DamIt
     from beaver_battle.leaderboard import Leaderboard
     from beaver_battle.treasure import SOLO_BOARDS, Treasure
@@ -209,6 +215,13 @@ def main():
     games = ('battle', 'treasure', 'dam')  # One or two players is a question inside Treasure Dash, not another game.
     dam = DamIt(config)
     count_pick, count_rects = 1, []
+    # One player against the computer: the bot takes whichever controller number the person is not holding, and
+    # from then on looks to the rest of the launcher like a second connected controller.
+    vs_bot, bot_id, battle_bot, dam_bot = bool(args.bot), 2, None, None
+    picked_game = 'treasure' if args.game == 'solo' else args.game or 'battle'
+    if vs_bot:
+        names[bot_id], battle_bot = 'BOT', BattleBot(bot_id)
+        game.names = dict(names)
     map_pick, map_rects, map_views = 0, [], {}
     scores = Leaderboard(config.get('treasure', {}).get('leaderboard_file', 'leaderboard.json'))
     solo_board, recorded = 0, False
@@ -222,11 +235,12 @@ def main():
     elif chosen == 'dam' and not unattended:
         ids = [1, 2]
         mode = 'names' if ask_names else 'dam'
+        dam.bots, dam_bot = ({bot_id}, DamBot(bot_id)) if vs_bot else (set(), None)
         dam.new_match(ids)
     elif chosen in ('treasure', 'solo') and not unattended:
         ids = [1] if chosen == 'solo' else [1, 2]
         mode = 'names' if ask_names else 'treasure'
-        treasure.new_match(ids, (2,) if args.simulate and chosen == 'treasure' else (), solo_board if chosen == 'solo' else None, chosen == 'solo')
+        treasure.new_match(ids, (2,) if (args.simulate or vs_bot) and chosen == 'treasure' else (), solo_board if chosen == 'solo' else None, chosen == 'solo')
         treasure.standings = scores.top(treasure.board['name']) if chosen == 'solo' else []
 
     def active_game():
@@ -235,10 +249,16 @@ def main():
 
     def start_chosen():
         """Leave the chooser (or the name screen) for the game that was picked."""
+        nonlocal battle_bot, dam_bot
+        if vs_bot:
+            names[bot_id] = 'BOT'
+        battle_bot = BattleBot(bot_id) if vs_bot else None
+        game.names = dict(names)
         if chosen == 'dam':
             if not args.simulate and not snapshot.calibrated:
                 return 'lobby', 'Calibrate the board before starting.'
             dam.names = dict(names)
+            dam.bots, dam_bot = ({bot_id}, dam_bot or DamBot(bot_id)) if vs_bot else (set(), None)
             dam.new_match(ids[:2])  # Builder and attacker swap every round.
             return 'dam', ''
         if chosen in ('treasure', 'solo'):
@@ -249,9 +269,10 @@ def main():
                 treasure.new_match(ids[:1], (), solo_board, True)
                 treasure.standings = scores.top(treasure.board['name'])
             else:
-                treasure.new_match(ids[:2], (2,) if args.simulate else ())
+                treasure.new_match(ids[:2], (bot_id,) if vs_bot else (2,) if args.simulate else ())
             return 'treasure', ''
         if args.simulate:
+            game.names = dict(names)
             game.new_match(ids, walls)
             return 'game', ''
         return 'lobby', ''
@@ -303,8 +324,8 @@ def main():
         home_rects.clear()
         screen.fill((224, 239, 241))
         text_line('PICK A GAME', 20, True)
-        cards = (('BEAVER BATTLE', ('Canoes, rocks, power-ups.', 'Sink the other beaver.', '2 players'), 'water.jpg'),
-                 ('TREASURE DASH', ('Draw a path to the chest,', 'then trace it to race there.', '1 or 2 players'), 'grass.jpg'),
+        cards = ((TITLES['battle'], ('Canoes, rocks, power-ups.', 'Sink the other beaver.', '2 players'), 'water.jpg'),
+                 (TITLES['treasure'], ('Draw a path to the chest,', 'then trace it to race there.', '1 or 2 players'), 'grass.jpg'),
                  ('DAM IT!', ('One draws a dam of sticks.', 'The other chews through it.', '2 players, swapping roles'), 'water.jpg'))
         for index, (title, lines, ground) in enumerate(cards):
             card = pygame.Rect(0, 0, 392, 420)
@@ -346,17 +367,53 @@ def main():
                 screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 96 + row * 34)))
         text_line('Click a game, or use the arrow keys and Enter' if args.simulate else 'Click a game, or button 1 to switch and button 2 to choose', height - 52)
 
+    def player_options():
+        """(title, three lines, beavers shown, what it starts) for the game picked on the chooser."""
+        bot = {'battle': ('Your canoe against', "the computer's.", 'First to sink the other wins.'),
+               'treasure': ('Race the computer', 'to the chest in the middle.', 'It draws and runs its own path.'),
+               'dam': ('You and the computer', 'take turns: one builds,', 'the other chews through.')}[picked_game]
+        two = {'battle': ('Two canoes, two lasers.', 'Sink the other beaver.', 'Best of the rounds wins.'),
+               'treasure': ('Race from opposite edges', 'to the chest in the middle.', 'First beaver there wins.'),
+               'dam': ('One draws a dam of sticks,', 'the other chews through it.', 'Swap roles every round.')}[picked_game]
+        options = [('1 PLAYER', bot, 1, 'bot'), ('2 PLAYERS', two, 2, 'two')]
+        if picked_game == 'treasure':
+            options.insert(0, ('TIME TRIAL', ('Alone: cross the whole board', 'against the clock.', "Today's best times are kept."), 1, 'solo'))
+        return options
+
+    def choose_players(choice):
+        """Leave the how-many screen for the match it asked for."""
+        nonlocal vs_bot, bot_id, chosen, ids, naming, typed
+        vs_bot = choice == 'bot'
+        # On real hardware the person may be holding either controller; the bot takes the other number.
+        bot_id = 1 if not args.simulate and active_ids == [2] else 2
+        chosen = 'solo' if choice == 'solo' else picked_game
+        if vs_bot:
+            names[bot_id] = 'BOT'
+        else:
+            for player_id in [player_id for player_id, name in names.items() if name == 'BOT']:
+                del names[player_id]
+        ids, naming, typed = ([1] if choice == 'solo' else [1, 2]), 0, ''
+        if choice == 'solo':
+            return 'maps', ''
+        if ask_names:
+            while naming < len(ids) and vs_bot and ids[naming] == bot_id:
+                naming += 1
+            return 'names', ''
+        if chosen == 'battle' and not args.simulate:
+            return 'lobby', ''
+        return start_chosen()
+
     def draw_players():
-        """Treasure Dash asks how many are playing: alone against the clock, or a race between two."""
+        """Every game asks how many are playing: one person against the computer, or two people. The second game also
+        has its time trial, alone against the clock."""
         count_rects.clear()
         screen.fill((224, 239, 241))
-        text_line('TREASURE DASH', 26, True)
+        text_line(TITLES[picked_game], 26, True)
         text_line('HOW MANY PLAYERS?', 150)
-        options = (('1 PLAYER', ('Cross the whole board', 'against the clock.', "Today's best times are kept."), 1),
-                   ('2 PLAYERS', ('Race from opposite edges', 'to the chest in the middle.', 'First beaver there wins.'), 2))
-        for index, (title, lines, beavers) in enumerate(options):
-            card = pygame.Rect(0, 0, 470, 330)
-            card.center = (width // 2 + (index * 2 - 1) * 270, height // 2 + 50)
+        options = player_options()
+        for index, (title, lines, beavers, choice) in enumerate(options):
+            card = pygame.Rect(0, 0, 470 if len(options) == 2 else 380, 330)
+            card.center = (width // 2 + round((index - (len(options) - 1) / 2) * (540 if len(options) == 2 else 400)), height // 2 + 50)
             count_rects.append(card)
             picked = index == count_pick
             pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 10, 20 if picked else 10), border_radius=40)
@@ -364,18 +421,19 @@ def main():
             for number in range(beavers):
                 face = game.portrait(number + 1, 2.2)
                 screen.blit(face, face.get_rect(center=(card.centerx + (number * 2 - (beavers - 1)) * 62, card.y + 78)))
-            name = sprites.label(title, 58, sprites.BLUE_BRIGHT)
+            name = sprites.fitted(sprites.label(title, 58, sprites.BLUE_BRIGHT), card.width - 30)
             screen.blit(name, name.get_rect(center=(card.centerx, card.y + 168)))
             for row, line in enumerate(lines):
-                image = sprites.sign(line, 26, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
+                image = sprites.sign(line, 26 if len(options) == 2 else 22, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
                 screen.blit(image, image.get_rect(center=(card.centerx, card.y + 222 + row * 34)))
         hover = scores_button.collidepoint(pygame.mouse.get_pos())
-        scores_button.center = (width // 2, height - 96)
-        pygame.draw.rect(screen, sprites.BLUE, scores_button.inflate(8, 8), border_radius=30)
-        pygame.draw.rect(screen, sprites.BLUE if hover else sprites.WHITE, scores_button, border_radius=26)
-        face = sprites.lettering("TODAY'S BEST TIMES  (B)", 28, sprites.WHITE if hover else sprites.BLUE, 1)
-        screen.blit(face, face.get_rect(center=(scores_button.centerx, scores_button.centery - 2)))
-        text_line('Click, press 1 or 2, or use the arrow keys and Enter.  Esc goes back.' if args.simulate
+        scores_button.center = (width // 2, height - 96) if picked_game == 'treasure' else (-999, -999)
+        if picked_game == 'treasure':
+            pygame.draw.rect(screen, sprites.BLUE, scores_button.inflate(8, 8), border_radius=30)
+            pygame.draw.rect(screen, sprites.BLUE if hover else sprites.WHITE, scores_button, border_radius=26)
+            face = sprites.lettering("TODAY'S BEST TIMES  (B)", 28, sprites.WHITE if hover else sprites.BLUE, 1)
+            screen.blit(face, face.get_rect(center=(scores_button.centerx, scores_button.centery - 2)))
+        text_line('Click, press a number, or use the arrow keys and Enter.  Esc goes back.' if args.simulate
                   else 'Click, or button 1 to switch and button 2 to choose', height - 46)
 
     def draw_maps():
@@ -430,7 +488,7 @@ def main():
                 for words, x, anchor in ((f'{place + 1}', panel.x + 36, 'center'), (name, panel.x + 70, 'midleft'), (f'{seconds:.2f} s', panel.right - 24, 'midright')):
                     image = sprites.lettering(words, 26, sprites.BLUE)
                     screen.blit(image, image.get_rect(**{anchor: (x, y)}))
-        image = sprites.sign('One-player Treasure Dash times, wiped at midnight.  Press any key to go back.', 22, sprites.BLUE_BRIGHT)
+        image = sprites.sign(f"One-player {TITLES['treasure']} times, wiped at midnight.  Press any key to go back.", 22, sprites.BLUE_BRIGHT)
         screen.blit(image, image.get_rect(center=(width // 2, 706)))
 
     def draw_info():
@@ -557,6 +615,8 @@ def main():
                         if typed.strip():
                             names[ids[naming]] = typed.strip()
                         naming, typed = naming + 1, ''
+                        while naming < len(ids) and vs_bot and ids[naming] == bot_id:
+                            naming += 1  # Nobody types the computer's name.
                         if naming >= len(ids):
                             game.names, naming = dict(names), 0
                             if chosen in ('treasure', 'solo', 'dam'):
@@ -592,17 +652,17 @@ def main():
                         if event.key == pygame.K_b:
                             mode = 'scores'
                             continue
-                        if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_TAB):
-                            count_pick = 1 - count_pick
-                        if event.key in (pygame.K_1, pygame.K_KP1, pygame.K_2, pygame.K_KP2):
-                            count_pick, decided = (0 if event.key in (pygame.K_1, pygame.K_KP1) else 1), True
+                        if event.key in (pygame.K_LEFT, pygame.K_UP):
+                            count_pick = (count_pick - 1) % len(player_options())
+                        if event.key in (pygame.K_RIGHT, pygame.K_DOWN, pygame.K_TAB):
+                            count_pick = (count_pick + 1) % len(player_options())
+                        number = {pygame.K_1: 0, pygame.K_KP1: 0, pygame.K_2: 1, pygame.K_KP2: 1, pygame.K_3: 2, pygame.K_KP3: 2}.get(event.key)
+                        if number is not None and number < len(player_options()):
+                            count_pick, decided = number, True
                         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             decided = True
                     if decided:
-                        chosen = ('solo', 'treasure')[count_pick]
-                        ids = [1] if chosen == 'solo' else [1, 2]
-                        naming, typed = 0, ''
-                        mode, menu_message = ('maps', '') if chosen == 'solo' else ('names', '') if ask_names else start_chosen()
+                        mode, menu_message = choose_players(player_options()[min(count_pick, len(player_options()) - 1)][3])
                     if event.type != pygame.QUIT:
                         continue
                 if mode == 'maps':
@@ -642,18 +702,9 @@ def main():
                     if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                         picked = True
                     if picked:
-                        chosen = games[home_pick]
-                        if chosen == 'treasure':
-                            mode = 'players'
-                        elif chosen == 'dam':
-                            ids, naming, typed = [1, 2], 0, ''
-                            mode, menu_message = ('names', '') if ask_names else start_chosen()
-                        elif args.simulate:
-                            ids = list(range(1, config['game']['players'] + 1))
-                            naming, typed = 0, ''
-                            mode, menu_message = ('names', '') if ask_names else start_chosen()
-                        else:
-                            mode, selection = 'lobby', 0
+                        # Every game asks next whether one is playing (against the computer) or two.
+                        picked_game = chosen = games[home_pick]
+                        mode, count_pick = 'players', min(count_pick, len(player_options()) - 1)
                     if event.type != pygame.QUIT and not (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                         continue
                 if mode == 'info' and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
@@ -773,7 +824,25 @@ def main():
                         laser_at = (round(pointer.aim[0]), round(pointer.aim[1]))
                     if laser_at is not None and mode in ('home', 'players', 'maps', 'lobby', 'pause', 'scores', 'info'):
                         pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=laser_at, rel=(0, 0), buttons=(0, 0, 0)))
-            host = min(active_ids, default=1)
+            # Each game has its own song; the menus share the theme.
+            within = resume_mode if mode in ('pause', 'info') else mode
+            board.track('canoodling' if within in ('game', 'countdown', 'ready') else 'dam_it' if within == 'dam' else 'theme')
+            humans = list(active_ids)
+            if vs_bot and chosen != 'solo':
+                if mode == 'lobby' and not args.simulate and humans and bot_id in humans and len(humans) == 1:
+                    # The one working controller turned out to be the number the bot had taken: swap over.
+                    names.pop(bot_id, None)
+                    bot_id = 3 - bot_id
+                    names[bot_id], battle_bot, dam_bot = 'BOT', BattleBot(bot_id), None
+                    game.names = dict(names)
+                # The computer stands in as the other controller: connected, ready when asked, and silent in menus.
+                if mode == 'game' and battle_bot is not None and game.phase == 'playing':
+                    inputs[bot_id] = battle_bot.step(game, dt)
+                else:
+                    inputs[bot_id] = PlayerInput(bot_id, None, False, mode == 'ready')
+                active_ids = sorted(set(active_ids) | {bot_id})
+                humans = [player_id for player_id in humans if player_id != bot_id] or [player_id for player_id in ids if player_id != bot_id]
+            host = min(humans, default=1)
             host_input = inputs.get(host, PlayerInput(host, connected=False))
             old_fire, old_special = previous.get(host, (False, False))
             driven = args.simulate or args.bench
@@ -817,18 +886,13 @@ def main():
                 if cycle:
                     home_pick = (home_pick + 1) % len(games)
                 else:
-                    chosen = games[home_pick]
-                    if chosen == 'dam':
-                        ids, naming, typed = [1, 2], 0, ''
-                    mode, menu_message = ('players', '') if chosen == 'treasure' else (('names', '') if ask_names else start_chosen()) if chosen == 'dam' else ('lobby', '')
+                    picked_game = chosen = games[home_pick]
+                    mode, count_pick = 'players', min(count_pick, len(player_options()) - 1)
             elif mode == 'players' and (cycle or (confirm and not key_confirm)):
                 if cycle:
-                    count_pick = 1 - count_pick
+                    count_pick = (count_pick + 1) % len(player_options())
                 else:
-                    chosen = ('solo', 'treasure')[count_pick]
-                    ids = [1] if chosen == 'solo' else [1, 2]
-                    naming, typed = 0, ''
-                    mode, menu_message = ('maps', '') if chosen == 'solo' else ('names', '') if ask_names else start_chosen()
+                    mode, menu_message = choose_players(player_options()[min(count_pick, len(player_options()) - 1)][3])
             elif mode == 'maps' and (cycle or (confirm and not key_confirm)):
                 if cycle:
                     map_pick = (map_pick + 1) % len(SOLO_BOARDS)
@@ -970,6 +1034,11 @@ def main():
                         held = (False, False, False)
                     inputs = {player_id: PlayerInput(player_id, spot, held[0], held[2]) for player_id in (1, 2)}
                 while accumulator >= 1 / 60:
+                    if dam_bot is not None:
+                        # The bot thinks once per physics step, as the clock it was tuned on does.
+                        inputs = dict(inputs)
+                        move = dam_bot.step(dam, 1 / 60)
+                        inputs[bot_id] = move if move is not None else PlayerInput(bot_id, None, False, False)
                     dam.update(1 / 60, inputs, None if args.simulate else snapshot.walls)
                     board.play(dam.sounds)
                     dam.sounds.clear()
@@ -1041,7 +1110,8 @@ def main():
             else:
                 screen.fill((224, 239, 241))
                 paused = resume_mode if mode == 'pause' else None
-                text_line('DAM IT!' if paused == 'dam' else 'TREASURE DASH' if paused == 'treasure' else 'BEAVER BATTLE', 80, True)
+                showing = paused if paused in ('dam', 'treasure') else 'treasure' if chosen in ('treasure', 'solo') and mode == 'names' else 'dam' if chosen == 'dam' and mode == 'names' else 'battle'
+                text_line(TITLES[showing], 80, True)
                 if mode == 'names':
                     text_line("WHO'S PLAYING?", 196)
                     for index, player_id in enumerate(ids):

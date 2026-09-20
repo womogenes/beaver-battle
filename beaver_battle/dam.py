@@ -55,6 +55,7 @@ class DamIt:
     builder: int = 1
     attacker: int = 2
     names: dict = field(default_factory=dict)
+    bots: set = field(default_factory=set)  # Players with no marker in their hand: their dam is drawn in light.
     solid: np.ndarray | None = None  # Valley walls: nothing passes.
     allowed: np.ndarray | None = None  # Where wood may be drawn.
     ink: np.ndarray | None = None  # What the builder has drawn so far.
@@ -169,7 +170,8 @@ class DamIt:
     def seal(self, camera_ink=None):
         """Turn what was drawn into a dam: join hairline gaps, fill closed shapes as logs, cut it into sections,
         and share the dam's strength over them by area."""
-        ink = (camera_ink if camera_ink is not None else self.ink) & self.allowed
+        # What the camera saw on the board, and whatever was drawn in light (by the mouse, or by a bot).
+        ink = (self.ink if camera_ink is None else camera_ink | self.ink) & self.allowed
         reach = max(1, round(self.setting("merge_gap", 14) * self.scale))
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * reach + 1, 2 * reach + 1))
         # Closed against the valley walls as well, so a stroke that stops just short of the bank still seals.
@@ -280,7 +282,7 @@ class DamIt:
         self.timer -= dt
         if 0 < math.ceil(self.timer) < before and self.timer <= 5:
             self.sounds.append("tick")
-        if ink is None and control is not None and control.aim is not None:
+        if (ink is None or self.builder in self.bots) and control is not None and control.aim is not None:
             aim = pygame.Vector2(control.aim)
             if control.fire:
                 if self.pen is not None and self.pen.distance_to(aim) > 1:
