@@ -124,3 +124,21 @@ deer_stall = 2.0 # Seconds a beaver is winded after running into a deer.
 deer_grace = 1.2 # Then this long to push past before a deer can wind it again.
 object_scale = 0.62 # Rocks and ponds are this fraction of their authored size, each with a smaller sibling.
 seed = 7
+
+[dam]
+build_seconds = 30 # The builder's time to draw.
+attack_seconds = 22 # The attacker's time to flood the lodge; tuned by checks/check_dam.py so neither role is favoured.
+strength = 270 # Bites in the whole dam, shared over its wood by area: more wood means weaker pieces.
+section = 40 # A dam breaks in pieces about this long, in logical pixels.
+stroke = 10 # Drawn thickness of wood.
+max_wood = 2600 # The most wood a builder may draw, as a length of stroke.
+merge_gap = 14 # Gaps in the drawing up to this wide are sealed; wider ones leak.
+lodge_clearance = 105 # No wood this close to the lodge.
+lodge_ring = 70 # The lodge is flooded when this much of the ground within the ring is under water:
+flood_goal = 0.5
+flow_speed = 120.0 # How fast water advances through a breach, in pixels per second.
+rise_speed = 1400.0 # The river filling the valley before the attack; only for show, unless the dam leaks.
+rise_seconds = 2.5
+beaver_speed = 200.0
+bite_seconds = 0.3 # The quickest a beaver can bite; holding the button bites at this rate.
+bite_reach = 34

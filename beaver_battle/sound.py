@@ -74,6 +74,9 @@ def build():
         "crack": mix(noise(.22, 5, 4) * decay(.22, 16), sweep(.16, 240, 70) * decay(.16, 18) * .7),
         "pickup": mix(sweep(.05, 300, 1500) * decay(.05, 30), after(.03, notes((784, 1047, 1568), .1) * .7)),
         "return": mix(notes((392, 523, 659, 784), .09, rate=10) * .6, sweep(.3, 200, 900) * decay(.3, 8, .05) * .3),
+        # Dam It!
+        "chomp": mix(noise(.07, 4, 31) * decay(.07, 38) * .9, sweep(.09, 420, 180, "square") * decay(.09, 30) * .5, after(.05, noise(.05, 9, 32) * decay(.05, 50) * .5)),
+        "rush": mix(noise(1.1, 18, 33) * np.minimum(1, span(1.1) / .15) * decay(1.1, 2.4, .01) * .8, noise(1.1, 70, 34) * decay(1.1, 2, .2) * .6),
         # Treasure Dash
         "go": notes((523, 523, 784), .14, rate=7) * .6,
         "tick": sweep(.06, 1200, 1100) * decay(.06, 40) * .5,

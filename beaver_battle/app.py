@@ -118,7 +118,7 @@ def main():
                         help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
-    parser.add_argument('--game', choices=('battle', 'treasure', 'solo'), help='go straight to one game instead of the chooser')
+    parser.add_argument('--game', choices=('battle', 'treasure', 'solo', 'dam'), help='go straight to one game instead of the chooser')
     parser.add_argument('--no-names', action='store_true', help='skip typing player names before a match')
     parser.add_argument('--mute', action='store_true', help='play no sound effects')
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
@@ -144,6 +144,7 @@ def main():
     import pygame
     from beaver_battle import sprites
     from beaver_battle.game import Game
+    from beaver_battle.dam import DamIt
     from beaver_battle.leaderboard import Leaderboard
     from beaver_battle.treasure import SOLO_BOARDS, Treasure
     from beaver_battle.vision import Vision
@@ -201,7 +202,8 @@ def main():
     # Two games share this launcher. The chooser comes first unless a flag or an unattended run picks one.
     treasure = Treasure(config)
     chosen = args.game or 'battle'
-    games = ('battle', 'treasure')  # One or two players is a question inside Treasure Dash, not a third game.
+    games = ('battle', 'treasure', 'dam')  # One or two players is a question inside Treasure Dash, not another game.
+    dam = DamIt(config)
     count_pick, count_rects = 1, []
     map_pick, map_rects, map_views = 0, [], {}
     scores = Leaderboard(config.get('treasure', {}).get('leaderboard_file', 'leaderboard.json'))
@@ -213,6 +215,10 @@ def main():
     unattended = args.headless or args.bench or args.seconds or args.calibrate
     if args.game is None and not unattended:
         mode = 'home'
+    elif chosen == 'dam' and not unattended:
+        ids = [1, 2]
+        mode = 'names' if ask_names else 'dam'
+        dam.new_match(ids)
     elif chosen in ('treasure', 'solo') and not unattended:
         ids = [1] if chosen == 'solo' else [1, 2]
         mode = 'names' if ask_names else 'treasure'
@@ -220,10 +226,17 @@ def main():
         treasure.standings = scores.top(treasure.board['name']) if chosen == 'solo' else []
 
     def active_game():
-        return treasure if (mode == 'treasure' or (mode in ('pause', 'info') and resume_mode == 'treasure')) else game
+        playing_now = resume_mode if mode in ('pause', 'info') else mode
+        return treasure if playing_now == 'treasure' else dam if playing_now == 'dam' else game
 
     def start_chosen():
         """Leave the chooser (or the name screen) for the game that was picked."""
+        if chosen == 'dam':
+            if not args.simulate and not snapshot.calibrated:
+                return 'lobby', 'Calibrate the board before starting.'
+            dam.names = dict(names)
+            dam.new_match(ids[:2])  # Builder and attacker swap every round.
+            return 'dam', ''
         if chosen in ('treasure', 'solo'):
             if not args.simulate and not snapshot.calibrated:
                 return 'lobby', 'Calibrate the board before starting.'
@@ -277,42 +290,51 @@ def main():
         screen.blit(surface, ((width - surface.get_width()) // 2, y - (18 if large else 0)))
 
     def draw_home():
-        """Pick a game: two cards, each showing a little of what it looks like."""
+        """Pick a game: three cards, each showing a little of what it looks like."""
         home_rects.clear()
         screen.fill((224, 239, 241))
-        text_line('PICK A GAME', 26, True)
-        cards = (('BEAVER BATTLE', ('Canoes, rocks and power-ups.', 'Sink the other beavers.', '2 or 3 players'), 'water.jpg'),
-                 ('TREASURE DASH', ('Draw a path to the chest,', 'then trace it to race there.', '1 or 2 players'), 'grass.jpg'))
+        text_line('PICK A GAME', 20, True)
+        cards = (('BEAVER BATTLE', ('Canoes, rocks, power-ups.', 'Sink the other beavers.', '2 or 3 players'), 'water.jpg'),
+                 ('TREASURE DASH', ('Draw a path to the chest,', 'then trace it to race there.', '1 or 2 players'), 'grass.jpg'),
+                 ('DAM IT!', ('One draws a dam of sticks.', 'The other chews through it.', '2 players, swapping roles'), 'water.jpg'))
         for index, (title, lines, ground) in enumerate(cards):
-            card = pygame.Rect(0, 0, 500, 440)
-            card.center = (width // 2 + (index * 2 - 1) * 290, height // 2 + 40)
+            card = pygame.Rect(0, 0, 392, 420)
+            card.center = (width // 2 + (index - 1) * 412, height // 2 + 30)
             home_rects.append(card)
             picked = index == home_pick
-            pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 10, 20 if picked else 10), border_radius=40)
-            pygame.draw.rect(screen, sprites.WHITE, card, border_radius=34)
-            scene = pygame.Rect(card.x + 22, card.y + 22, card.width - 44, 210)
-            view = sprites.tiled_ground(ground, scene.width, scene.height, 300 if index == 0 else 900, lighten=.35)
+            pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 8, 20 if picked else 8), border_radius=38)
+            pygame.draw.rect(screen, sprites.WHITE, card, border_radius=32)
+            scene = pygame.Rect(card.x + 18, card.y + 18, card.width - 36, 190)
+            view = sprites.tiled_ground(ground, scene.width, scene.height, 900 if index == 1 else 300, lighten=.35)
             if index == 0:
-                for place, color, turn in (((120, 110), sprites.PLAYER_COLORS[0], 20), ((330, 95), sprites.PLAYER_COLORS[1], 165)):
-                    boat = pygame.transform.rotozoom(sprites.canoe(18, color, 1.5), -turn, 1)
+                for place, color, turn in (((95, 100), sprites.PLAYER_COLORS[0], 20), ((262, 88), sprites.PLAYER_COLORS[1], 165)):
+                    boat = pygame.transform.rotozoom(sprites.canoe(18, color, 1.35), -turn, 1)
                     view.blit(boat, boat.get_rect(center=place))
-                    head = sprites.tim(19, 1.5)
+                    head = sprites.tim(19, 1.35)
                     view.blit(head, head.get_rect(center=place))
                 rock = sprites.pebble(5, zoom=2)
-                view.blit(rock, rock.get_rect(center=(225, 100)))
-            else:
-                trail = [(60, 150), (130, 120), (190, 150), (260, 118), (320, 112)]
+                view.blit(rock, rock.get_rect(center=(180, 94)))
+            elif index == 1:
+                trail = [(52, 138), (112, 108), (168, 140), (232, 104), (292, 100)]
                 pygame.draw.lines(view, sprites.INK, False, trail, 13)
                 pygame.draw.lines(view, sprites.PLAYER_COLORS[0], False, trail, 8)
-                for piece, place in ((sprites.boulder(22, 3), (170, 78)), (sprites.chest(74), (360, 100)), (sprites.tim(24, 1.4), (70, 140))):
+                for piece, place in ((sprites.boulder(20, 3), (150, 70)), (sprites.chest(66), (316, 92)), (sprites.tim(22, 1.3), (58, 128))):
+                    view.blit(piece, piece.get_rect(center=place))
+            else:
+                # The river held back by a line of sticks, the lodge dry behind it, and a beaver with its eye on the wood.
+                meadow = sprites.tiled_ground('grass.jpg', scene.width, scene.height, 900, lighten=.35)
+                view.blit(meadow, (150, 0), (150, 0, scene.width - 150, scene.height))
+                pygame.draw.line(view, sprites.BARK_LINE, (150, -5), (162, scene.height + 5), 22)
+                pygame.draw.line(view, sprites.BARK, (150, -5), (162, scene.height + 5), 14)
+                for piece, place in ((sprites.lodge(52), (286, 100)), (sprites.tim(20, 1.25), (200, 116))):
                     view.blit(piece, piece.get_rect(center=place))
             screen.blit(view, scene)
             pygame.draw.rect(screen, sprites.BLUE, scene, 4, border_radius=6)
-            name = sprites.label(title, 52, sprites.BLUE_BRIGHT)
-            screen.blit(name, name.get_rect(center=(card.centerx, scene.bottom + 52)))
+            name = sprites.label(title, 44, sprites.BLUE_BRIGHT)
+            screen.blit(name, name.get_rect(center=(card.centerx, scene.bottom + 46)))
             for row, line in enumerate(lines):
-                image = sprites.sign(line, 28, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
-                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 104 + row * 36)))
+                image = sprites.sign(line, 25, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
+                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 96 + row * 34)))
         text_line('Click a game, or use the arrow keys and Enter' if args.simulate else 'Click a game, or button 1 to switch and button 2 to choose', height - 52)
 
     def draw_players():
@@ -407,6 +429,9 @@ def main():
         if resume_mode == 'treasure' and info_return == 'pause':
             draw_treasure_info()
             return
+        if resume_mode == 'dam' and info_return == 'pause':
+            draw_dam_info()
+            return
         rules = config['game']
         screen.fill((224, 239, 241))
         text_line('HOW TO PLAY', 30, True)
@@ -441,6 +466,32 @@ def main():
                                       'Draw on the board with a marker: lines become sticks, closed shapes become logs and rocks.')):
             image = sprites.sign(line, 23)
             screen.blit(image, image.get_rect(center=(width // 2, 628 + index * 32)))
+        image = sprites.sign('Press any key or button to go back', 22, sprites.BLUE_BRIGHT)
+        screen.blit(image, image.get_rect(center=(width // 2, 700)))
+
+    def draw_dam_info():
+        rules = config['dam']
+        screen.fill((224, 239, 241))
+        text_line('HOW TO PLAY', 30, True)
+        sections = (
+            ('1  BUILD', (f"The builder has {rules['build_seconds']:g} s to draw a dam across the valley, from bank to bank",
+                          'Hold the left button to draw; right click when you are done' if args.simulate else 'Draw it on the whiteboard with a marker',
+                          'A dam has one fixed strength, shared over all its wood: draw more and every piece is weaker',
+                          'Open strokes are sticks and closed shapes are logs. A real gap leaks, and a leak loses at once')),
+            ('2  ATTACK', (('The beaver follows the mouse; click or hold next to the wood to chew it' if args.simulate
+                            else 'The beaver follows your laser; press a button next to the wood to chew it'),
+                           'A broken piece lets the river through, and the water runs for the lodge',
+                           f"Flood the lodge within {rules['attack_seconds']:g} s and the attacker wins; keep it dry and the builder wins",
+                           'Then swap roles and play again')),
+        )
+        y = 170
+        for heading, lines in sections:
+            title = sprites.label(heading, 40, sprites.BLUE_BRIGHT)
+            screen.blit(title, title.get_rect(center=(width // 2, y)))
+            for index, line in enumerate(lines):
+                image = sprites.sign(line, 25)
+                screen.blit(image, image.get_rect(center=(width // 2, y + 52 + index * 40)))
+            y += 84 + len(lines) * 40
         image = sprites.sign('Press any key or button to go back', 22, sprites.BLUE_BRIGHT)
         screen.blit(image, image.get_rect(center=(width // 2, 700)))
 
@@ -497,7 +548,7 @@ def main():
                         naming, typed = naming + 1, ''
                         if naming >= len(ids):
                             game.names, naming = dict(names), 0
-                            if chosen in ('treasure', 'solo'):
+                            if chosen in ('treasure', 'solo', 'dam'):
                                 mode, menu_message = start_chosen()
                             elif args.simulate:
                                 game.new_match(ids, walls)
@@ -583,6 +634,9 @@ def main():
                         chosen = games[home_pick]
                         if chosen == 'treasure':
                             mode = 'players'
+                        elif chosen == 'dam':
+                            ids, naming, typed = [1, 2], 0, ''
+                            mode, menu_message = ('names', '') if ask_names else start_chosen()
                         elif args.simulate:
                             ids = list(range(1, config['game']['players'] + 1))
                             naming, typed = 0, ''
@@ -601,7 +655,7 @@ def main():
                             selection = index
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 key_confirm = True
-                playing = mode in ('game', 'treasure')
+                playing = mode in ('game', 'treasure', 'dam')
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and playing and active_game().phase == 'match_over':
                     if again_button.collidepoint(event.pos):
                         again = True
@@ -609,7 +663,7 @@ def main():
                         mode, map_pick = 'maps', treasure.board_index
                         continue
                     elif menu_button.collidepoint(event.pos):
-                        mode, selection = ('home' if mode == 'treasure' else 'lobby'), 0
+                        mode, selection = ('home' if mode in ('treasure', 'dam') else 'lobby'), 0
                         continue
                 if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and playing and active_game().phase == 'match_over':
                     again = True
@@ -642,7 +696,7 @@ def main():
                     continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if mode in ('game', 'treasure'):
+                        if mode in ('game', 'treasure', 'dam'):
                             resume_mode, mode = mode, 'pause'
                             selection = 0
                         elif mode == 'pause':
@@ -662,7 +716,7 @@ def main():
                     elif event.key == pygame.K_c and not forced:
                         mode = 'calibration'
                         vision.begin_calibration()
-                    elif event.key == pygame.K_r and args.simulate and mode in ('game', 'treasure', 'pause'):
+                    elif event.key == pygame.K_r and args.simulate and mode in ('game', 'treasure', 'dam', 'pause'):
                         mode, menu_message = start_chosen()
             laser_at = None
             if forced:
@@ -724,7 +778,9 @@ def main():
                     home_pick = (home_pick + 1) % len(games)
                 else:
                     chosen = games[home_pick]
-                    mode, menu_message = ('players', '') if chosen == 'treasure' else ('lobby', '')
+                    if chosen == 'dam':
+                        ids, naming, typed = [1, 2], 0, ''
+                    mode, menu_message = ('players', '') if chosen == 'treasure' else (('names', '') if ask_names else start_chosen()) if chosen == 'dam' else ('lobby', '')
             elif mode == 'players' and (cycle or (confirm and not key_confirm)):
                 if cycle:
                     count_pick = 1 - count_pick
@@ -759,7 +815,7 @@ def main():
                         mode = 'home'
                     elif choice == 'Resume':
                         mode, status = resume_mode, ''
-                    elif choice == 'New match' and resume_mode == 'treasure':
+                    elif choice == 'New match' and resume_mode in ('treasure', 'dam'):
                         mode, menu_message = start_chosen()
                     elif choice == 'New match':
                         mode, selection = 'lobby', 0
@@ -844,6 +900,24 @@ def main():
                 elif treasure.phase == 'match_over' and confirm:
                     mode, selection = 'home', 0
                 again = False
+            elif mode == 'dam':
+                accumulator += dt
+                if args.simulate:
+                    # One mouse, two jobs: whoever's turn it is holds it. The builder draws, then passes it over.
+                    spot, held = pygame.mouse.get_pos(), pygame.mouse.get_pressed(3)
+                    if pause_button.union(info_button).collidepoint(spot):
+                        held = (False, False, False)
+                    inputs = {player_id: PlayerInput(player_id, spot, held[0], held[2]) for player_id in (1, 2)}
+                while accumulator >= 1 / 60:
+                    dam.update(1 / 60, inputs, None if args.simulate else snapshot.walls)
+                    board.play(dam.sounds)
+                    dam.sounds.clear()
+                    accumulator -= 1 / 60
+                if dam.phase == 'match_over' and (again or (cycle and not key_cycle)):
+                    mode, menu_message = start_chosen()
+                elif dam.phase == 'match_over' and confirm:
+                    mode, selection = 'home', 0
+                again = False
             else:
                 accumulator = 0
             if mode in ('survey', 'survey_match'):
@@ -882,15 +956,15 @@ def main():
                 draw_players()
             elif mode == 'maps':
                 draw_maps()
-            elif mode in ('game', 'countdown', 'treasure'):
+            elif mode in ('game', 'countdown', 'treasure', 'dam'):
                 active_game().draw(screen)
-                if mode in ('game', 'treasure') and active_game().phase == 'match_over':
+                if mode in ('game', 'treasure', 'dam') and active_game().phase == 'match_over':
                     solo_over = mode == 'treasure' and treasure.solo
                     # Solo gets three: the same board again, the next board, or out.
                     again_button.center = (width // 2 - (330 if solo_over else 170), height - 96)
                     next_button.center = (width // 2, height - 96)
                     menu_button.center = (width // 2 + (300 if solo_over else 210), height - 96)
-                    hints = [('RETRY' if solo_over else 'PLAY AGAIN', 'Enter' if args.simulate else 'button 1', again_button)]
+                    hints = [('RETRY' if solo_over else 'SWAP ROLES' if mode == 'dam' else 'PLAY AGAIN', 'Enter' if args.simulate else 'button 1', again_button)]
                     if solo_over:
                         hints.append(('CHANGE MAP', 'N', next_button))
                     hints.append(('MENU', 'Space' if args.simulate else 'button 2', menu_button))
@@ -902,7 +976,7 @@ def main():
                         screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
                         hint = sprites.sign(how, 22)
                         screen.blit(hint, hint.get_rect(center=(button.centerx, button.bottom + 20)))
-                if mode in ('game', 'treasure'):
+                if mode in ('game', 'treasure', 'dam'):
                     for button, icon in ((pause_button, 'pause'), (info_button, 'info')):
                         pygame.draw.circle(screen, sprites.BLUE, button.center, 20)
                         pygame.draw.circle(screen, sprites.WHITE, button.center, 16)
