@@ -182,16 +182,20 @@ game.judge()
 hop = left.jumps[0]
 assert game.point_at(left, hop - 1).distance_to(entry) < 30 and game.point_at(left, hop + 1).distance_to(exit_pad) < 30
 run(game, config["treasure"]["check_seconds"] + .1)
-while left.travelled <= hop + 2 and game.phase == "running":
-    run(game, .1, lambda: tracing(game))
-assert "warp" in game.sounds and left.pos.distance_to(exit_pad) < 40
+# Traced the way a person does it: the laser stays on the first stroke until the beaver has got to the pad.
+for frame in range(60 * 20):
+    if left.travelled > hop + 2 or game.phase != "running":
+        break
+    lead = min(left.travelled + 50, hop - 1) if left.travelled < hop else left.travelled + 50
+    game.update(1 / 60, {1: PlayerInput(1, tuple(game.point_at(left, lead)), False, False)})
+assert left.travelled > hop and "warp" in game.sounds and left.pos.distance_to(exit_pad) < 40, "a beaver at a portal goes through unaided"
 without = fresh(6)
 without.portals = []
 draw(without, without.runners[1], [left.start, (left.start.x, entry.y), entry])
 draw(without, without.runners[1], [exit_pad, (exit_pad.x + 40, game.chest.y - 60), game.chest])
 assert without.find_route(without.runners[1], without.runners[1].ink)[0] is None, "without the portal those two strokes do not connect"
 
-# A deer in the way holds a beaver up only while it stands there; a boost token gives a burst of speed and is used up.
+# Running into a deer winds a beaver for two seconds, after which it may push past; a berry gives a burst of speed.
 game = fresh(1)
 left = game.runners[1]
 draw(game, left, game.bot_plan(left))
@@ -200,12 +204,14 @@ game.judge()
 run(game, config["treasure"]["check_seconds"] + .1)
 blocker = Deer(game.point_at(left, 45), game.point_at(left, 45), wait=99)
 game.deer = [blocker]
-run(game, 2, lambda: tracing(game))
-assert left.travelled < 30 and left.held and left.state != "stuck" and "bleat" in game.sounds
-blocker.pos.update(40, 700)
-blocker.target.update(40, 700)
 run(game, 1, lambda: tracing(game))
-assert left.travelled > 60 and not left.held
+assert left.stall > 0 and left.travelled < 30 and left.state != "stuck" and "bleat" in game.sounds
+stalled_at = left.travelled
+run(game, config["treasure"]["deer_stall"] - 1.2, lambda: tracing(game))
+assert left.travelled == stalled_at, "winded means no progress at all"
+run(game, 1.4, lambda: tracing(game))
+assert left.stall == 0 and left.travelled > 60, "after the stall the beaver pushes past the same deer"
+blocker.pos.update(40, 700)
 game.boosts = [[game.point_at(left, left.travelled + 30), True]]
 run(game, 1, lambda: tracing(game))
 assert not game.boosts[0][1] and "zip" in game.sounds and left.boost > 0
@@ -247,6 +253,18 @@ with tempfile.TemporaryDirectory() as folder:
     assert Leaderboard(path, today="2026-09-20").top("TWIN LAKES") == []
     path.write_text("not json")
     assert Leaderboard(path, today="2026-09-19").top("TWIN LAKES") == []
+
+# However many lines are scribbled, one path is chosen: the cheapest way through the ink from start to chest.
+game = fresh(2)
+left = game.runners[1]
+plan = game.bot_plan(left)
+draw(game, left, plan)
+draw(game, left, [left.start, (left.start.x + 40, 660), (game.chest.x - 60, 660), game.chest])  # a long way round as well
+draw(game, left, [(300, 120), (420, 140)])  # and a stray scribble that leads nowhere
+route, missed = game.find_route(left, left.ink)
+length = sum(first.distance_to(second) for first, second in zip(route, route[1:]))
+direct = sum(first.distance_to(second) for first, second in zip(plan, plan[1:]))
+assert route is not None and length < direct * 1.25, "the short path is the one that is kept"
 
 # Rendering every phase works, and every sound the game names exists.
 surface = pygame.Surface((1280, 720))

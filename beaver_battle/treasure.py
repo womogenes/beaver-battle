@@ -180,8 +180,8 @@ class Runner:
     drawn: float = 0.0
     lapse: float = 0.0
     jumps: list = field(default_factory=list)  # Distances along the route at which a portal is taken.
-    startled: float = 0.0
-    held: bool = False
+    stall: float = 0.0  # Seconds left winded after running into a deer.
+    shy: float = 0.0  # Seconds during which deer cannot stall this beaver again.
 
 
 @dataclass
@@ -564,8 +564,13 @@ class Treasure:
         for runner in self.runners.values():
             if runner.state in ("stuck", "home"):
                 continue
-            runner.boost, runner.cooldown, runner.startled = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt), max(0.0, runner.startled - dt)
-            runner.held = False
+            runner.boost, runner.cooldown = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt)
+            runner.shy = max(0.0, runner.shy - dt)
+            if runner.stall > 0:
+                # Winded by a deer: nothing to do but wait it out.
+                runner.stall = max(0.0, runner.stall - dt)
+                runner.shy = self.setting("deer_grace", 1.2)
+                continue
             if runner.player_id in self.bots:
                 aim, special = self.bot_trace(runner, dt)
             else:
@@ -585,6 +590,11 @@ class Treasure:
             runner.state = "swimming" if swimming else "walking"
             # The beaver only moves while the laser is tracing the line just ahead of it.
             target = self.traced(runner, aim)
+            for mark in runner.jumps:
+                # A beaver that reaches a portal goes through on its own. Tracing cannot lead it across: the line
+                # just ahead is at the far pad, where nobody's laser is yet, and it would wait at the edge for ever.
+                if 0 <= mark - runner.travelled <= 10 * self.scale:
+                    target = max(target, mark + 3 * self.scale)
             if target <= runner.travelled:
                 continue
             pace = self.setting("swim_speed" if swimming else "walk_speed", 48 if swimming else 68) * self.scale
@@ -596,12 +606,11 @@ class Treasure:
                 runner.state = "stuck"
                 self.sounds.append("bonk")
                 continue
-            if any(deer.pos.distance_to(place) < 30 * self.scale and deer.pos.distance_to(place) < deer.pos.distance_to(runner.pos) for deer in self.deer):
-                # A deer in the way: wait for it to bound off. Unlike a rock, it will.
-                runner.held = True
-                if runner.startled == 0:
-                    runner.startled = 1.6
-                    self.sounds.append("bleat")
+            if runner.shy == 0 and any(deer.pos.distance_to(place) < 30 * self.scale for deer in self.deer):
+                # Run into a deer and you are winded for a couple of seconds; then you may push past it.
+                runner.stall = self.setting("deer_stall", 2.0)
+                self.sounds.append("bleat")
+                self.sparkle(place, 10)
                 continue
             for mark in runner.jumps:
                 if runner.travelled <= mark < ahead:
@@ -685,17 +694,21 @@ class Treasure:
         surface = sprites.tiled_ground("grass.jpg", self.width, self.height, self.width, lighten=self.setting("grass_wash", .35))
         pond = sprites.tiled_ground("water.jpg", self.width, self.height, round(620 * unit), lighten=.18)
         mask = self.water.astype(np.uint8) * 255
-        bank = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (round(18 * unit) | 1, round(18 * unit) | 1)))
-        for layer, alpha in ((None, bank), (pond, mask)):
+        # Every pond and river is edged with a wall of cobblestones, outlined where it meets the grass and the water.
+        reach = round(40 * unit) | 1
+        bank = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (reach, reach)))
+        stones = sprites.tiled_ground("cobble.jpg", self.width, self.height, round(230 * unit))
+        for layer, alpha in ((stones, bank), (pond, mask)):
             sheet = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-            if layer is None:
-                sheet.fill((226, 214, 160))
-            else:
-                sheet.blit(layer, (0, 0))
+            sheet.blit(layer, (0, 0))
             pixels = pygame.surfarray.pixels_alpha(sheet)
             pixels[:] = cv2.GaussianBlur(alpha, (5, 5), 0).T
             del pixels
             surface.blit(sheet, (0, 0))
+            edges = cv2.findContours(alpha, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)[0]
+            for edge in edges:
+                if len(edge) > 2:
+                    pygame.draw.lines(surface, sprites.STONE_DARK, True, edge.reshape(-1, 2).tolist(), max(2, round(3 * unit)))
         for first, second, half in self.logs:
             along = second - first
             image = sprites.stick(round(along.length() / unit), round(2 * half / unit), unit, seed=round(first.x + first.y))
@@ -733,16 +746,25 @@ class Treasure:
             color = colors[runner.player_id]
             pygame.draw.circle(frame, sprites.INK, runner.start, 26 * unit)
             pygame.draw.circle(frame, sprites.tint(color, .35), runner.start, 22 * unit)
-            if not self.camera_ink or runner.player_id in self.bots:
+            chosen = runner.route and self.phase != "drawing"
+            if not chosen and (not self.camera_ink or runner.player_id in self.bots):
+                # While drawing (or when no path reached the chest) every stroke is shown, scribbles and all.
                 for wide, shade in ((10, sprites.INK), (6, color)):
                     for first, second in runner.strokes:
                         pygame.draw.line(frame, shade, first, second, max(2, round(wide * unit)))
                         pygame.draw.circle(frame, shade, second, max(1, round(wide * unit / 2)))
-            if runner.route and self.phase != "drawing":
-                # The line the beaver will actually walk, including any little breaks that were joined up.
-                for distance in range(0, int(runner.marks[-1]), max(6, round(18 * unit))):
-                    done = distance <= runner.travelled
-                    pygame.draw.circle(frame, sprites.WHITE if done else sprites.INK, self.point_at(runner, distance), max(2, round((4 if done else 3) * unit)))
+            if chosen:
+                # Once judged, only the one path the beaver will walk is drawn: spare strokes and dead ends vanish,
+                # little breaks appear joined, and a portal hop is simply not drawn.
+                step = max(3, round(5 * unit))
+                spots = [self.point_at(runner, distance) for distance in range(0, int(runner.marks[-1]) + step, step)]
+                for wide, shade in ((10, sprites.INK), (6, color)):
+                    for first, second in zip(spots, spots[1:]):
+                        if first.distance_to(second) < step * 3:
+                            pygame.draw.line(frame, shade, first, second, max(2, round(wide * unit)))
+                            pygame.draw.circle(frame, shade, second, max(1, round(wide * unit / 2)))
+                for distance in range(0, int(min(runner.travelled, runner.marks[-1])), max(6, round(18 * unit))):
+                    pygame.draw.circle(frame, sprites.WHITE, self.point_at(runner, distance), max(2, round(3 * unit)))
             if runner.state == "broken" and runner.broken_at is not None:
                 cross = sprites.label("X", max(20, round(64 * unit)), sprites.PINK_DARK)
                 frame.blit(cross, cross.get_rect(center=runner.broken_at))
@@ -750,9 +772,9 @@ class Treasure:
                             lambda: sprites.chest(48 * unit, open_lid=self.phase == "match_over" and self.winner is not None))
         frame.blit(chest, chest.get_rect(center=self.chest + pygame.Vector2(0, -4 * unit * abs(math.sin(self.clock * 2.4)))))
         for deer in self.deer:
-            image = self.sprite(("deer", deer.facing), lambda: pygame.transform.flip(sprites.deer(24 * unit), deer.facing < 0, False))
+            image = self.sprite(("deer", deer.facing), lambda: pygame.transform.flip(sprites.deer(26 * unit), deer.facing < 0, False))
             walking = deer.wait <= 0
-            frame.blit(image, image.get_rect(center=deer.pos + pygame.Vector2(0, 2.5 * unit * abs(math.sin(self.clock * 14 + deer.pos.x)) if walking else 0)))
+            frame.blit(image, image.get_rect(center=deer.pos + pygame.Vector2(0, -5 * unit * abs(math.sin(self.clock * 12 + deer.pos.x)) if walking else 0)))
         for runner in self.runners.values():
             self.draw_beaver(frame, runner, colors[runner.player_id])
         for x, y, vx, vy, life, size in self.particles:
@@ -781,8 +803,14 @@ class Treasure:
         pygame.draw.rect(frame, sprites.INK, plate.inflate(5 * unit, 5 * unit), border_radius=round(14 * unit))
         pygame.draw.rect(frame, sprites.tint(color, .45), plate, border_radius=round(12 * unit))
         frame.blit(word, word.get_rect(center=plate.center))
-        if runner.held:
-            oops = sprites.sign("DEER!", max(14, round(24 * unit)))
+        if runner.stall > 0:
+            # Seeing stars, with the seconds left.
+            for index in range(3):
+                angle = self.clock * 5 + index * math.tau / 3
+                spot = center + pygame.Vector2(math.cos(angle) * 20, -22 + math.sin(angle) * 7) * unit
+                pygame.draw.circle(frame, sprites.INK, spot, 5 * unit)
+                pygame.draw.circle(frame, sprites.BUTTER, spot, 3.4 * unit)
+            oops = sprites.sign(f"OOF!  {runner.stall:.1f}", max(14, round(24 * unit)))
             frame.blit(oops, oops.get_rect(center=center + pygame.Vector2(0, 30 * unit)))
         if runner.state == "stuck":
             stuck = sprites.sign("STUCK!", max(14, round(26 * unit)))

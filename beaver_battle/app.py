@@ -455,7 +455,7 @@ def main():
                          'A path that never reaches the chest loses on the spot')),
             ('2  RACE', ('Your beaver only walks while your laser traces the line just ahead of it' if not args.simulate
                          else 'Your beaver only walks while the mouse traces the line just ahead of it',
-                         'Rocks, trees and sticks on your line stop you for good; a deer only until it bounds off',
+                         f"Rocks, trees and sticks on your line stop you for good; running into a deer winds you for {rules.get('deer_stall', 2):g} s",
                          'Ponds are allowed: you swim a bit slower, so a short swim can beat a long detour',
                          ('Click' if args.simulate else 'Either button') + f": a {rules['boost_seconds']:g} s speed boost, ready again after {rules['boost_cooldown']:g} s",
                          'Matching portals join up: draw to one and carry on from the other. Berries give a burst of speed',

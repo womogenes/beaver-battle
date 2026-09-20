@@ -657,30 +657,40 @@ def tree(radius, seed=1, zoom=1):
     return pen.image()
 
 
-FAWN = (206, 158, 112)
-FAWN_DARK = (168, 120, 88)
+FAWN = (214, 164, 112)
+FAWN_DARK = (150, 100, 78)
+FAWN_PALE = (250, 234, 204)
+ANTLER = (146, 98, 76)
 
 
 def deer(size, zoom=1):
-    """A deer from above, facing right: a slim fawn-coloured body with pale spots, a white tail and antlers."""
-    pen = Pen(96, 64, size * zoom / 26, zoom)
-    for x in (-12, 10):
-        for side in (-1, 1):
-            pen.ellipse(FAWN_DARK, (x, side * 12), 3.4, 5, outline=FUR_LINE, width=1.3)
-    shapes = [(FAWN, pen.oval((-4, 0), 25, 12)), (FAWN, pen.oval((22, 0), 11, 7)), (FAWN, pen.oval((33, 0), 8, 6.5))]
-    shapes += [(FAWN, pen.oval((30, side * 8.5), 5.5, 2.6, side * .9)) for side in (-1, 1)]
-    pen.union(shapes, 1.5, FUR_LINE)
-    pen.ellipse(WHITE, (-29, 0), 5, 4, outline=FUR_LINE, width=1.2)
-    for x, y in ((-16, -4), (-8, 4), (0, -5), (7, 3), (-20, 5), (-3, 0)):
-        pen.ellipse(CREAM, (x, y), 2.1, outline=None)
-    pen.ellipse(FAWN_DARK, (-4, 0), 17, 2.2, outline=None)
+    """A fawn sitting up and facing you, in the manner of Tim: big head, big eyes, pink ears, little antlers, spots."""
+    pen = Pen(64, 70, size * zoom / 24, zoom)
     for side in (-1, 1):
-        # Antlers: a main beam sweeping back with two tines.
-        pen.stroke([(31, side * 4), (27, side * 12), (19, side * 17)], WOOD_LIGHT, 2.4, closed=False)
-        pen.stroke([(27, side * 12), (31, side * 18)], WOOD_LIGHT, 2, closed=False)
-        pen.stroke([(23, side * 15), (22, side * 21)], WOOD_LIGHT, 2, closed=False)
-        pen.ellipse(EYE, (35, side * 3.4), 1.5, outline=None)
-    pen.ellipse(EYE, (40.5, 0), 2.2, 2.6, outline=None)
+        pen.stroke([(side * 6, -17), (side * 9, -29)], ANTLER, 3.4, closed=False)
+        pen.stroke([(side * 8, -24), (side * 14, -28)], ANTLER, 3, closed=False)
+        pen.stroke([(side * 8.5, -26), (side * 4, -31)], ANTLER, 3, closed=False)
+    body = [(FAWN, pen.oval((0, 20), 13, 12)), (FAWN_PALE, pen.oval((15, 22), 5.5, 7, -.5))]
+    body += [(FAWN_DARK, pen.oval((side * 8, 30), 5, 3.2)) for side in (-1, 1)]
+    pen.union(body, 1.5, FUR_LINE)
+    pen.ellipse(FAWN_PALE, (0, 19), 7, 9, outline=None)
+    for x, y in ((9, 15), (11, 21), (-10, 17)):
+        pen.ellipse(FAWN_PALE, (x, y), 1.7, outline=None)
+    head = [(FAWN, pen.oval((side * 17, -9), 9, 5.5, side * -.75)) for side in (-1, 1)]
+    head += [(FAWN, pen.oval((side * 11, 5), 7, 6.5)) for side in (-1, 1)] + [(FAWN, pen.oval((0, -2), 18, 15.5))]
+    pen.union(head, 1.5, FUR_LINE)
+    for side in (-1, 1):
+        pen.ellipse(BLUSH, (side * 17, -9), 6, 3.2, side * -.75, outline=None)
+    pen.ellipse(FAWN_PALE, (0, 5), 11.5, 8.5, outline=None)
+    for x, y in ((-5, -13), (0, -15), (5, -13), (-9, -10)):
+        pen.ellipse(FAWN_PALE, (x, y), 1.6, outline=None)
+    for side in (-1, 1):
+        pen.ellipse(BEAVER_EYE, (side * 8, -1), 4.4, 5, outline=None)
+        pen.ellipse(WHITE, (side * 8 - 1.5, -3), 1.7, outline=None)
+        pen.ellipse(WHITE, (side * 8 + 1.6, 1.4), .9, outline=None)
+        pen.ellipse(BLUSH, (side * 13, 6), 3.2, 2.2, outline=None)
+    pen.ellipse(BEAVER_EYE, (0, 4), 2.6, 2, outline=None)
+    pen.stroke([(-4, 8), (-2, 10), (0, 8.4), (2, 10), (4, 8)], FUR_LINE, .9, closed=False)
     return pen.image()
 
 
