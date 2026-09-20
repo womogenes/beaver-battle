@@ -62,20 +62,15 @@ assert "return" in game.sounds and not game.hit(victim, by=1)
 run(game, rules["return_invulnerability"] + .1)
 assert game.hit(victim, by=1) and victim.state == "beaver"
 
-# Sinking a swimmer scores for whoever did it, not for the last canoe afloat.
-game = arena((1, 2, 3))
-game.players[3].pos.update(900, 600)
+# Sinking a swimmer scores for whoever did it, not for being the last canoe afloat.
+game = arena()
 target = game.players[2]
-game.hit(target, by=3)
+game.hit(target, by=1)
+assert game.scores == {1: 0, 2: 0}, "knocking a beaver into the water is not a point yet"
 target.invulnerability = 0
-game.hit(target, by=3)
-assert target.state == "eliminated" and game.scores == {1: 0, 2: 0, 3: 1} and game.phase == "playing"
-last = game.players[1]
-game.hit(last, by=3)
-last.invulnerability = 0
-game.hit(last, by=3)
+game.hit(target, by=1)
 game.update(0, {})
-assert game.scores == {1: 0, 2: 0, 3: 2} and game.phase == "round_over" and game.winner == 3
+assert target.state == "eliminated" and game.scores == {1: 1, 2: 0} and game.phase == "round_over" and game.winner == 1
 
 # Nobody scores for a sinking with no culprit, or for sinking themselves.
 game = arena()
@@ -96,16 +91,14 @@ game.update(1 / 60, {})
 assert swimmer.state == "eliminated" and game.scores[1] == 1 and "ram" in game.sounds
 
 # The match ends at the end of a round once somebody leads with the goal; a shared lead plays on.
-game = arena((1, 2, 3))
-game.scores.update({1: 5, 2: 5, 3: 0})
-for player_id in (2, 3):
-    game.players[player_id].state = "eliminated"
+game = arena()
+game.scores.update({1: 5, 2: 5})
+game.players[2].state = "eliminated"
 game.update(0, {})
 assert game.phase == "round_over", "5-5 is overtime, not a win"
-game = arena((1, 2, 3))
-game.scores.update({1: 5, 2: 4, 3: 0})
-for player_id in (2, 3):
-    game.players[player_id].state = "eliminated"
+game = arena()
+game.scores.update({1: 5, 2: 4})
+game.players[2].state = "eliminated"
 game.update(0, {})
 assert game.phase == "match_over" and game.winner == 1
 

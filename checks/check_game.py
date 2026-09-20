@@ -39,7 +39,7 @@ def arena(players=(1, 2), moving=False):
 
 
 game = Game(config)
-game.new_match([1, 2, 3])
+game.new_match([1, 2])
 assert not game.blocked
 assert {prop.kind for prop in game.props} == {"asteroid"}
 
@@ -298,7 +298,7 @@ assert game.players[1].speed == config["game"]["beaver_speed"]
 
 # The complete renderer does not project dark ink or laser-red placeholder pixels.
 game = Game(config)
-game.new_match([1, 2, 3])
+game.new_match([1, 2])
 game.update(.1, {}, drawing(log_outline, rock_outline))
 surface = pygame.Surface((1280, 720))
 game.draw(surface)

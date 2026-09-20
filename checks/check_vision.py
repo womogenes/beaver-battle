@@ -329,13 +329,12 @@ def check_identity():
     assert tracker.update([(100, 100), (200, 100)], 1.21, 1, 1.2)[0] == {}, "Ambiguous ID window"
     assert tracker.update([(100, 100)], 1.22, 1, 1.2)[0] == {1: (100, 100)}
     tracker.update([(300, 100)], 1.24, 2, 1.2)
-    tracker.update([(500, 100)], 1.26, 3, 1.2)
-    aims, confidence = tracker.update([(505, 100), (305, 100), (105, 100)], 1.30)
-    assert aims == {1: (105, 100), 2: (305, 100), 3: (505, 100)}, "Assignment is independent of component order"
-    assert len(confidence) == 3
-    assert tracker.update([(110, 100), (310, 100), (510, 100)], 1.31, None, 1.4)[0] == {}
+    aims, confidence = tracker.update([(305, 100), (105, 100)], 1.30)
+    assert aims == {1: (105, 100), 2: (305, 100)}, "Assignment is independent of component order"
+    assert len(confidence) == 2
+    assert tracker.update([(110, 100), (310, 100)], 1.31, None, 1.4)[0] == {}
     assert tracker.update([], 1.35)[0] == {}
-    assert tracker.update([(105, 100), (305, 100), (505, 100)], 1.4)[0] == {}, "Lost identity needs a new ID window"
+    assert tracker.update([(105, 100), (305, 100)], 1.4)[0] == {}, "Lost identity needs a new ID window"
     assert tracker.update([(110, 100)], 1.41, 1, 1.4)[0] == {1: (110, 100)}
 
     crossing = LaserTracker()

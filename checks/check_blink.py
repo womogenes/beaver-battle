@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-SKETCHES = [Path(f"firmware/arduino/identity_blink_{n}/identity_blink_{n}.ino") for n in (1, 2, 3)]
+SKETCHES = [Path(f"firmware/arduino/identity_blink_{n}/identity_blink_{n}.ino") for n in (1, 2)]
 SKETCH = SKETCHES[0]
 PROBE = r"""
 #include <stdio.h>
@@ -19,7 +19,7 @@ PROBE = r"""
 
 int main(void)
 {
-    for (int id = 1; id <= 3; id++) {
+    for (int id = 1; id <= 2; id++) {
         printf("%d %u\n", id, laser_identity_period_ms(id));
         for (uint32_t ms = 0; ms < 3000; ms++) {
             printf("%d", laser_identity_level(id, laser_identity_gap_ms(id), ms) ? 1 : 0);
@@ -55,11 +55,11 @@ def firmware_says():
 
 
 def sketch_period(controller_id):
-    return {2: 800, 3: 1000}.get(controller_id, 600)
+    return 800 if controller_id == 2 else 600
 
 
 def sketch_gap(controller_id):
-    return sketch_period(controller_id) * 22 // 100
+    return sketch_period(controller_id) * 22 // 100 if controller_id == 2 else 0
 
 
 def sketch_level(controller_id, elapsed):
@@ -84,7 +84,7 @@ def sketch_button(debounce):
 def check_parity():
     debounce = sketch_constant("DEBOUNCE_MS")
     lines = firmware_says().strip().splitlines()
-    for index, controller_id in enumerate((1, 2, 3)):
+    for index, controller_id in enumerate((1, 2)):
         stated_id, period = lines[index * 2].split()
         assert int(stated_id) == controller_id
         assert int(period) == sketch_period(controller_id), \
@@ -92,7 +92,15 @@ def check_parity():
         mine = "".join("1" if sketch_level(controller_id, ms) else "0" for ms in range(3000))
         assert lines[index * 2 + 1] == mine, \
             f"controller {controller_id}: blink differs from the firmware within three seconds"
-    assert lines[6] == sketch_button(debounce), "button settle differs from button_update"
+    assert lines[4] == sketch_button(debounce), "button settle differs from button_update"
+
+
+def check_controller_one_never_blinks():
+    """Controller 1 is identified by the absence of gaps, so it must never have one."""
+    from subprocess import run
+    assert sketch_gap(1) == 0
+    assert all(sketch_level(1, ms) for ms in range(4000)), "controller 1 must stay lit"
+    assert not all(sketch_level(2, ms) for ms in range(4000)), "controller 2 must blink"
 
 
 def check_the_laser_starts_dark():
@@ -114,12 +122,13 @@ def check_one_sketch_per_controller():
         text = sketch.read_text()
         assert f"const int CONTROLLER_ID = {index};" in text, f"{sketch.name} must be controller {index}"
         bodies[index] = text.replace(f"const int CONTROLLER_ID = {index};", "CONTROLLER_ID")
-    assert bodies[1] == bodies[2] == bodies[3], \
-        "the three sketches differ by more than their controller number"
+    assert bodies[1] == bodies[2], \
+        "the two sketches differ by more than their controller number"
 
 
 check_parity()
+check_controller_one_never_blinks()
 check_the_laser_starts_dark()
 check_one_sketch_per_controller()
-print("Blink checks passed: three sketches agree with the firmware on period, gap, blink "
+print("Blink checks passed: both sketches agree with the firmware on period, gap, blink "
       "and button settle; each starts dark and needs FIRE held")

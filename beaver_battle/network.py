@@ -65,7 +65,7 @@ class ControllerBridge:
                 return False
             player_id = packet.get('id')
             valid = (type(packet.get('v')) is int and packet['v'] == 1 and packet.get('type') == 'input'
-                     and type(player_id) is int and 1 <= player_id <= 3
+                     and type(player_id) is int and 1 <= player_id <= 2
                      and all(unsigned(packet.get(key)) for key in ('boot', 'seq', 'command_seq'))
                      and type(packet.get('buttons')) is int and 0 <= packet['buttons'] <= 3
                      and type(packet.get('laser')) is bool)

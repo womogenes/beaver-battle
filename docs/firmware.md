@@ -204,6 +204,98 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
+## ESP-NOW, with a third board as the receiver
+
+`controller_espnow_1`, `_2` and `receiver_espnow` avoid the venue's network completely.
+ESP-NOW is peer to peer on the Wi-Fi radio: no access point, no association, no DHCP and
+nothing from the room in the path. That removes the failure this project has already hit,
+where client isolation stopped controllers reaching the laptop while the internet worked.
+
+A laptop cannot speak ESP-NOW, which is why the third board is needed. It listens and
+writes each packet to USB serial as a line, and `beaver_battle.relay` turns those lines
+back into the UDP datagrams the game already expects, so the bridge, the protocol and the
+game are untouched and the radio can change without any of them noticing.
+
+    uv run --with pyserial python -m beaver_battle.relay --port /dev/cu.usbserial-0001
+
+The receiver's serial link runs at 460800, which `beaver_battle.relay` defaults to. It is
+not a free choice. Two controllers at 50 Hz offer about 10 kB/s of JSON, and 115200 8N1
+carries 11.5 kB/s, so the link sat at 86 percent and Arduino's `Serial.write` blocks once
+the transmit buffer fills. That block happened inside the ESP-NOW receive callback, which
+stalled the Wi-Fi task and made the driver drop frames it had already heard. It showed as
+6.5 percent loss on controller 2 and none on controller 1, with clean sequence gaps and
+almost no truncated lines, which is what makes it easy to misread as a radio or antenna
+problem. It is neither: it is the USB cable behind the radio.
+
+So the receive callback now only copies into a 64-slot ring and returns, `loop` is the
+only writer to serial, and the heartbeat carries a `dropped` count that stays at zero
+unless the ring overflows. 921600 was measured too and moves the loss, but the CH340 in
+this cable then drops runs of bytes out of the middle of a line: six corrupted lines in
+2062, against one in 3045 at 460800. 460800 leaves four times the headroom and keeps
+framing intact, so it wins on both counts.
+
+| baud | controller 1 loss | controller 2 loss | corrupted lines |
+| --- | --- | --- | --- |
+| 115200 | 0.00% | 6.53% | 1 / 1968 |
+| 921600 | 0.00% | 0.39% | 6 / 2062 |
+| 460800 | 0.00% | 0.79% | 1 / 3045 |
+
+The sub-one-percent that remains is two controllers contending for one channel, and it
+costs nothing: the protocol repeats button state every 20 ms rather than sending edges
+once, so a lost packet delays a press by one frame instead of dropping it.
+
+Both controllers measured together, receiver on USB and both on power banks: the bridge
+saw ids 1 and 2 on separate endpoints, rejected no packets, and held both connected on
+506 of 507 frames. Every button on both controllers then registered through the projected
+prompt, 12 presses of 134 to 204 ms, one edge each and no bounce.
+
+All three boards must sit on the same channel, fixed at 1 in the sketches rather than
+inherited from an access point that does not exist. The payload is exactly the PROTOCOL.md
+v1 input packet, and the controllers broadcast rather than unicast so no board needs the
+receiver's MAC compiled into it.
+
+Measured with controller 1 alone on a power bank and the receiver on USB: the radio
+carried 601 packets in twelve seconds, exactly the 50 a second the controller sends, with
+no loss. Button masks crossed intact, 61 packets carrying button one and 88 carrying button
+two across 31 mask changes that followed the presses. Relayed into the real bridge, the
+game saw the controller and read `PlayerInput.fire` on 54 frames and `PlayerInput.special`
+on 75, which is button two arriving as player input with nothing of the venue network in
+the path.
+
+Two silences look alike here and are worth separating when this goes wrong. A controller
+that sends nothing and a receiver that hears nothing both read as zero packets, which is
+why the controllers report what their radio did; and ESP-NOW answers SEND_SUCCESS for a
+broadcast once the frame leaves the antenna, with no peer acknowledging it, so that counter
+proves transmission and never reception. The receiver's own count is the only evidence the
+link works.
+
+The relay gives every controller its own socket. The bridge treats a controller's endpoint
+as its identity and drops packets that seem to come from somewhere new while the old
+endpoint is still live, so one shared socket would make the two controllers look like
+impostors of each other.
+
+## Wireless controller from Arduino, over ordinary Wi-Fi
+
+`firmware/arduino/controller_wifi_1` and `_2` speak PROTOCOL.md v1 over UDP, so button two
+reaches the laptop from a machine that has no ESP-IDF. The ESP-IDF build in `main/` is the
+real firmware and already sends both buttons; these exist only because Arduino cannot build
+it. Copy `secrets.example.h` to `secrets.h` in the sketch folder, which is not committed.
+
+They drive the laser locally from the button rather than from host commands, and always
+report `command_seq` as 0. That makes a lost command unable to leave a player unable to
+aim, at the cost of the host not being able to command the laser at all, so the identity
+scheduler cannot drive solo windows while this build is in use. Identity comes from the
+blink pattern instead, which is what it is for.
+
+**Which radio in a crowded room.** Both Wi-Fi and Bluetooth sit in the same congested
+2.4 GHz band, so choosing Bluetooth to dodge Wi-Fi congestion buys nothing. What buys
+reliability is not depending on the venue's network: run the hotspot from the laptop and
+point `secrets.h` at it. Venue Wi-Fi commonly isolates clients from one another, which
+stops a controller reaching the laptop even while the internet works, and that has already
+been seen on this project. ESP-NOW would be lower latency still but a laptop cannot speak
+it without a third ESP32 acting as a receiver. If the room defeats the radio entirely, the
+boards are already on USB for power and a serial link needs no radio at all.
+
 ## Identity blink bench test
 
 `BB_LASER_IDENTITY_TEST` drives the laser continuously with this controller's identity
@@ -243,7 +335,18 @@ Beware of measuring a window in which nobody was holding the button. Several run
 setting this up read as a weak or failing laser, and the laser was simply not lit; a
 measurement of laser strength is only meaningful alongside evidence the laser was on.
 
-The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
+Controller 1 never blinks. Blinking costs detection, since a dot that is dark cannot be
+tracked and a frame that missed it looks exactly like a gap, so the one controller that
+needs no gap in order to be recognised is better off without one: it is the dot with no
+periodic gaps, and it keeps all of its light for tracking. That also leaves only two blink
+patterns to tell apart rather than three, and 800 against 1000 was already the easier pair.
+
+With two players the question is only whether the gaps come round at all: steady is
+controller 1, gaps every 800 ms is controller 2. Duty matters as well as periodicity,
+because a controller whose gaps are being missed looks steady too, and only its lower
+share of lit frames tells it apart from a laser that never blinks.
+
+For controllers 2 and 3 the gap is 22 percent of the period, so 176 and 220 ms, and
 `BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
 longest period the smallest share and therefore the least signal to correlate: simulated at
 the dropout rate measured on the bench, a fixed 133 ms identified controller 3 correctly on

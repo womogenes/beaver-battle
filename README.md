@@ -72,7 +72,7 @@ device = 0
 wall_threshold = 75
 
 [game]
-players = 3
+players = 2
 shot_interval = 0.30
 reload_seconds = 2.5
 ```
@@ -85,6 +85,7 @@ reload_seconds = 2.5
 uv run python -m checks.check_game
 uv run python -m checks.check_shapes
 uv run python -m checks.check_blink
+uv run python -m checks.check_relay
 uv run python -m checks.check_vision
 uv run python -m checks.check_network
 uv run python -m checks.check_app

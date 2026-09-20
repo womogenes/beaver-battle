@@ -11,3 +11,4 @@ firmware/sdkconfig.old
 firmware/managed_components/
 *.core
 leaderboard.json
+firmware/arduino/*/secrets.h

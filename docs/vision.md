@@ -119,3 +119,36 @@ Physical calibration verified on September 19, 2026, on the macOS laptop against
 That run was marginal on optics, not on code. Measured on the board that afternoon, projected black read 152-174 against projected white at about 173, roughly twenty gray levels with a per-pixel standard deviation near 4. On twenty consecutive frames under those conditions, unequalized detection found all four markers on 0, equalized detection at clip 8 and 16 tiles found all four on 20 in one lighting state and on 1 in a slightly brighter one, with single markers dropping in and out; multi-frame accumulation is what closed that gap. Turning off the lights above the whiteboard and raising projector brightness remains the highest-value change available, and no exposure, gain, or white balance control was touched to obtain these numbers.
 
 A separate live UVC rate check captured 60 frames after five warm-up frames at MJPEG 1280×720: 29.95 fps, median frame interval 33.42 ms, maximum 35.40 ms. This supports about five frames within the configured 180 ms solo observation window under the sampled conditions. It does not measure Wi-Fi acknowledgement delay, optical laser settling, or projector latency. The capture was released and no exposure controls were changed.
+
+## Two lasers at once
+
+Measured with the firmware's own laser gate as ground truth, which every input packet
+carries. This matters more than it sounds: the ESP-NOW build lights the laser only while
+FIRE is held, so an earlier run that scored the camera without it was really measuring how
+long a button stayed down, and read 44 percent held as a detection failure. Score the
+camera only against frames the controller says were lit.
+
+Three phases on one calibration, each laser alone and then together:
+
+| | controller 1 | controller 2 |
+| --- | --- | --- |
+| median blob area | 98 px2 | 1 px2 |
+| median redness | 31 | 18 |
+| peak redness | 53 | 25 |
+| found, of frames its gate was lit | 78% | about 11% |
+
+With both lit the camera resolved two dots on 14 percent of frames and one dot on 80
+percent. They were not merging: median separation where both were seen was 170 px, far
+outside `laser_merge`. Controller 2's dot is simply too faint, confirmed by eye on the
+board rather than landing outside the calibrated rectangle.
+
+No threshold fixes this. Redness is `red - max(blue, green)`, bounded by how bright the
+surface is, and the bare board peaks at 15 under a white projection against a threshold of
+16. Controller 2's median of 18 is the noise floor, so a threshold low enough to catch it
+admits the board. Both sketches drive GPIO25 with `digitalWrite` and no PWM, so firmware is
+ruled out and the difference is the module or its supply.
+
+The blink identity scheme is confirmed in firmware but unread by vision. Controller 2's
+gate measured 76.9 and 79.6 percent duty across two runs against a designed 78, and
+controller 1 exactly 100. Whether a camera can recover that blink is untested and stays
+untested until both dots are reliably visible.

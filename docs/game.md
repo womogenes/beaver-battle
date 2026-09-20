@@ -13,7 +13,7 @@ The optional image is a complete initial arena render. Checks exercise every wea
 
 ```python
 game = Game(config)
-game.new_match([1, 2, 3], walls)
+game.new_match([1, 2], walls)
 events = game.update(1 / 60, inputs, walls)
 game.draw(surface)
 ```

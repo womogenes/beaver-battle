@@ -419,8 +419,8 @@ class Game:
 
     def new_match(self, player_ids, walls=None):
         ids = list(player_ids)
-        if not 1 <= len(ids) <= 3 or len(set(ids)) != len(ids) or any(player not in (1, 2, 3) for player in ids):
-            raise ValueError("Choose one to three distinct controller IDs from 1, 2, 3")
+        if not 1 <= len(ids) <= 2 or len(set(ids)) != len(ids) or any(player not in (1, 2) for player in ids):
+            raise ValueError("Choose one or two distinct controller IDs from 1, 2")
         self.width = int(self.setting("width", 1280))
         self.height = int(self.setting("height", 720))
         self.scale = min(self.width / 1280, self.height / 720)
