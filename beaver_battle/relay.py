@@ -60,7 +60,7 @@ class Relay:
 def main():
     parser = argparse.ArgumentParser(description='Relay ESP-NOW controller packets to the game')
     parser.add_argument('--port', required=True, help='serial port of the receiver board')
-    parser.add_argument('--baud', type=int, default=115200)
+    parser.add_argument('--baud', type=int, default=460800)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--udp', type=int, default=4210)
     parser.add_argument('--quiet', action='store_true')

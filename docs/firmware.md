@@ -218,12 +218,43 @@ game are untouched and the radio can change without any of them noticing.
 
     uv run --with pyserial python -m beaver_battle.relay --port /dev/cu.usbserial-0001
 
+The receiver's serial link runs at 460800, which `beaver_battle.relay` defaults to. It is
+not a free choice. Two controllers at 50 Hz offer about 10 kB/s of JSON, and 115200 8N1
+carries 11.5 kB/s, so the link sat at 86 percent and Arduino's `Serial.write` blocks once
+the transmit buffer fills. That block happened inside the ESP-NOW receive callback, which
+stalled the Wi-Fi task and made the driver drop frames it had already heard. It showed as
+6.5 percent loss on controller 2 and none on controller 1, with clean sequence gaps and
+almost no truncated lines, which is what makes it easy to misread as a radio or antenna
+problem. It is neither: it is the USB cable behind the radio.
+
+So the receive callback now only copies into a 64-slot ring and returns, `loop` is the
+only writer to serial, and the heartbeat carries a `dropped` count that stays at zero
+unless the ring overflows. 921600 was measured too and moves the loss, but the CH340 in
+this cable then drops runs of bytes out of the middle of a line: six corrupted lines in
+2062, against one in 3045 at 460800. 460800 leaves four times the headroom and keeps
+framing intact, so it wins on both counts.
+
+| baud | controller 1 loss | controller 2 loss | corrupted lines |
+| --- | --- | --- | --- |
+| 115200 | 0.00% | 6.53% | 1 / 1968 |
+| 921600 | 0.00% | 0.39% | 6 / 2062 |
+| 460800 | 0.00% | 0.79% | 1 / 3045 |
+
+The sub-one-percent that remains is two controllers contending for one channel, and it
+costs nothing: the protocol repeats button state every 20 ms rather than sending edges
+once, so a lost packet delays a press by one frame instead of dropping it.
+
+Both controllers measured together, receiver on USB and both on power banks: the bridge
+saw ids 1 and 2 on separate endpoints, rejected no packets, and held both connected on
+506 of 507 frames. Every button on both controllers then registered through the projected
+prompt, 12 presses of 134 to 204 ms, one edge each and no bounce.
+
 All three boards must sit on the same channel, fixed at 1 in the sketches rather than
 inherited from an access point that does not exist. The payload is exactly the PROTOCOL.md
 v1 input packet, and the controllers broadcast rather than unicast so no board needs the
 receiver's MAC compiled into it.
 
-Measured on the bench, controller 1 on a power bank and the receiver on USB: the radio
+Measured with controller 1 alone on a power bank and the receiver on USB: the radio
 carried 601 packets in twelve seconds, exactly the 50 a second the controller sends, with
 no loss. Button masks crossed intact, 61 packets carrying button one and 88 carrying button
 two across 31 mask changes that followed the presses. Relayed into the real bridge, the

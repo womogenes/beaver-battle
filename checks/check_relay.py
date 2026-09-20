@@ -6,6 +6,7 @@ checked against the real bridge rather than against an idea of it.
 
 import json
 import socket
+import pathlib
 import time
 
 from beaver_battle.model import VisionSnapshot
@@ -63,7 +64,34 @@ def check_the_bridge_accepts_what_the_relay_sends():
         bridge.stop()
 
 
+def check_the_baud_matches_the_receiver():
+    """A relay that disagrees with the sketch reads pure noise, with nothing to say why.
+
+    Nothing at runtime can catch this: the bytes arrive, they are simply wrong, so the
+    only symptom is every line failing to parse. Worth a check rather than a comment.
+    """
+    import re
+    sketch = pathlib.Path(__file__).resolve().parent.parent / 'firmware' / 'arduino' \
+        / 'receiver_espnow' / 'receiver_espnow.ino'
+    found = re.search(r'const uint32_t BAUD = (\d+);', sketch.read_text())
+    assert found, 'receiver sketch must declare BAUD'
+    firmware_baud = int(found.group(1))
+
+    source = (pathlib.Path(__file__).resolve().parent.parent / 'beaver_battle' / 'relay.py').read_text()
+    default = re.search(r"'--baud', type=int, default=(\d+)", source)
+    assert default, 'relay must declare a default baud'
+    assert int(default.group(1)) == firmware_baud, (
+        f'relay default {default.group(1)} must match receiver BAUD {firmware_baud}')
+
+    # Two controllers at 50 Hz is the load the link has to carry, with the measured line
+    # length; 115200 sat at 86 percent and the receiver dropped frames under backpressure.
+    offered = 2 * 50 * 100
+    assert offered / (firmware_baud / 10.0) < 0.35, (
+        f'baud {firmware_baud} leaves too little headroom for two controllers')
+
+
 check_lines_it_should_ignore()
 check_the_bridge_accepts_what_the_relay_sends()
+check_the_baud_matches_the_receiver()
 print('Relay checks passed: packet filtering, both controllers reach the bridge on separate '
-      'endpoints, and both buttons arrive as player input', flush=True)
+      'endpoints, both buttons arrive as player input, and the baud matches the receiver', flush=True)
