@@ -47,4 +47,13 @@ void controller_disconnect(Controller *controller);
 bool controller_command(Controller *controller, const Command *command,
                         uint64_t now_ms, bool servo_enabled);
 
+typedef struct {
+    uint32_t start_us, end_us, pulse_us;
+    uint64_t next_ms;
+    unsigned stage;
+} ServoSqueeze;
+
+bool servo_squeeze_start(ServoSqueeze *squeeze, uint32_t start_us, uint32_t end_us, uint64_t now_ms);
+uint32_t servo_squeeze_tick(ServoSqueeze *squeeze, uint64_t now_ms);
+
 #endif

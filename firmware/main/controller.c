@@ -134,3 +134,25 @@ bool controller_command(Controller *controller, const Command *command,
     controller->laser = command->laser;
     return true;
 }
+
+/* Three timed targets; the main loop keeps reading buttons throughout. */
+bool servo_squeeze_start(ServoSqueeze *squeeze, uint32_t start_us, uint32_t end_us, uint64_t now_ms)
+{
+    if (squeeze->stage || start_us < 544 || start_us > 2400 ||
+        end_us < 544 || end_us > 2400 || start_us == end_us) {
+        return false;
+    }
+    *squeeze = (ServoSqueeze){.start_us = start_us, .end_us = end_us,
+        .pulse_us = start_us, .next_ms = now_ms + 500, .stage = 1};
+    return true;
+}
+
+uint32_t servo_squeeze_tick(ServoSqueeze *squeeze, uint64_t now_ms)
+{
+    if (squeeze->stage && now_ms >= squeeze->next_ms) {
+        squeeze->stage = (squeeze->stage + 1) % 4;
+        squeeze->pulse_us = squeeze->stage == 2 ? squeeze->end_us : squeeze->start_us;
+        squeeze->next_ms = now_ms + 500;
+    }
+    return squeeze->pulse_us;
+}

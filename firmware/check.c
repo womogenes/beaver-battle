@@ -157,6 +157,22 @@ int main(void)
     assert(servo_jog(1500, false, true, 1000, 2000, 25) == 1525);
     assert(servo_jog(1010, true, false, 1000, 2000, 25) == 1000);
     assert(servo_jog(1990, false, true, 1000, 2000, 25) == 2000);
+    ServoSqueeze squeeze = {0};
+    assert(!servo_squeeze_start(&squeeze, 0, 1600, 0));
+    assert(!servo_squeeze_start(&squeeze, 1500, 1500, 0));
+    assert(servo_squeeze_start(&squeeze, 1300, 1750, 10));
+    assert(squeeze.pulse_us == 1300 && squeeze.stage == 1);
+    assert(!servo_squeeze_start(&squeeze, 1300, 1750, 20));
+    assert(servo_squeeze_tick(&squeeze, 509) == 1300);
+    assert(servo_squeeze_tick(&squeeze, 510) == 1750 && squeeze.stage == 2);
+    assert(servo_squeeze_tick(&squeeze, 1009) == 1750);
+    assert(servo_squeeze_tick(&squeeze, 1010) == 1300 && squeeze.stage == 3);
+    assert(servo_squeeze_tick(&squeeze, 1510) == 1300 && squeeze.stage == 0);
+    assert(servo_squeeze_start(&squeeze, 1750, 1300, 2000));
+    assert(servo_squeeze_tick(&squeeze, 9000) == 1300 && squeeze.stage == 2);
+    assert(servo_squeeze_tick(&squeeze, 9001) == 1300); /* no skipped dwell on late tick */
+    squeeze.stage = 0; /* cancellation holds the current pulse */
+    assert(servo_squeeze_tick(&squeeze, 9501) == 1300);
     puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect, servo jogging.");
     return 0;
 }

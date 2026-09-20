@@ -236,26 +236,48 @@ static void laser_identity_test(void)
 #ifdef CONFIG_BB_SERVO_BUTTON_TEST
 static void servo_button_test(void)
 {
-    Button fire = {0};
-    Button special = {0};
-    uint32_t pulse_us = 1500;
-    uint64_t next_step_ms = time_ms() + 20;
+    Button fire = {0}, special = {0};
+    ServoSqueeze squeeze = {0};
+    uint32_t pulse_us = 1500, start_us = 0, end_us = 0;
+    uint64_t next_step_ms = time_ms() + 20, next_status_ms = 0;
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "SERVO BUTTON TEST: GPIO%d lowers pulse; GPIO%d raises; neither/both holds; laser off; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
-    ESP_LOGI(log_tag, "SERVO GPIO%d 1500 us; limits %d..%d us; step %d us / 20 ms", SERVO_GPIO,
-             CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+    fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
+    ESP_LOGI(log_tag, "SERVO CALIBRATION D33: D14 decreases, D27 increases; both/neither hold; laser off");
+    ESP_LOGI(log_tag, "Serial: r=save start, e=save end, s=squeeze, x=cancel, ?=status; endpoints reset on reboot");
     while (true) {
         uint64_t now = time_ms();
-        buttons_read(&fire, &special, now);
+        bool changed = buttons_read(&fire, &special, now);
+        char command;
+        while (read(STDIN_FILENO, &command, 1) == 1) {
+            if (command == 'r' && !squeeze.stage) start_us = pulse_us;
+            if (command == 'e' && !squeeze.stage) end_us = pulse_us;
+            if (command == 's') {
+                if (!fire.pressed && !special.pressed && servo_squeeze_start(&squeeze, start_us, end_us, now)) {
+                    pulse_us = squeeze.pulse_us;
+                    servo_pulse(pulse_us);
+                    ESP_LOGI(log_tag, "SQUEEZE start -> end -> start");
+                } else ESP_LOGW(log_tag, "Squeeze refused: save two distinct endpoints first, or wait until idle");
+            }
+            if (command == 'x') squeeze.stage = 0;
+            next_status_ms = 0;
+        }
+        if (changed && (fire.pressed || special.pressed)) squeeze.stage = 0;
         if (now >= next_step_ms) {
             next_step_ms = now + 20;
-            uint32_t requested = servo_jog(pulse_us, fire.pressed, special.pressed,
-                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+            uint32_t requested = squeeze.stage ? servo_squeeze_tick(&squeeze, now) :
+                servo_jog(pulse_us, fire.pressed, special.pressed,
+                    CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
             if (requested != pulse_us) {
                 pulse_us = requested;
                 servo_pulse(pulse_us);
-                ESP_LOGI(log_tag, "SERVO GPIO%d %" PRIu32 " us", SERVO_GPIO, pulse_us);
+                next_status_ms = 0;
             }
+        }
+        if (now >= next_status_ms) {
+            ESP_LOGI(log_tag, "SERVO D33 pulse=%" PRIu32 " us angle~%" PRIu32 " deg | start=%" PRIu32 " end=%" PRIu32 " | phase=%u | D14=%d D27=%d",
+                pulse_us, (pulse_us - 544) * 180 / (2400 - 544), start_us, end_us,
+                squeeze.stage, fire.pressed, special.pressed);
+            next_status_ms = now + 500;
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
     }

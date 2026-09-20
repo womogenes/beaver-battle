@@ -419,3 +419,21 @@ Loss this high is survivable for buttons, since the protocol repeats state every
 rather than sending edges once, but it removes the margin that keeps aiming responsive and
 gets worse with two controllers contending in a crowded room. Place the receiver away from
 the laptop before a match and confirm zero loss.
+
+## Squeeze-bottle endpoint calibration (D33)
+
+The ESP-IDF `BB_SERVO_BUTTON_TEST` now includes a nonblocking squeeze action.
+Select this test alone (`BB_LASER_BUTTON_TEST` disabled). D14 decreases the pulse,
+D27 increases it; both or neither holds. D33 drives the servo at 50 Hz; D25 stays
+low and networking is disabled during this standalone calibration. The bench
+uses 10 microsecond jog steps every 20 ms across 544–2400 microseconds.
+Reported degrees are an approximate pulse mapping, not measured shaft angle.
+
+Serial at115200 accepts `r` to record the current start/rest position, `e` to
+record the end/squeeze position, `s` to run start → end → start, `x` to cancel
+and hold, and `?` to report position and endpoints. Each target is held for
+500 ms. A fresh button press cancels the sequence and returns to manual jogging.
+The two distinct endpoints must be recorded before a squeeze is accepted;
+retriggering during a cycle is rejected. Endpoints currently live in RAM and
+must be recorded again after reboot. Final calibrated values can then be used
+by the shared `servo_squeeze_start`/`servo_squeeze_tick` C functions.
