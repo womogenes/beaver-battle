@@ -54,3 +54,14 @@ Coordinates are logical projector pixels, origin at top-left, x right and y down
   throws rocks. Each D27 press performs one action: use a held power-up, otherwise
   throw one rock when ammunition/cooldown allow. Holding D27 does not repeat.
   Fast packet-batched taps are consumed once across physics substeps.
+
+## Fixed match board and restored squeeze (2026-09-20)
+
+- User requested a static Beaver Battle board because live interpretation was noisy.
+  Each match now shows blank white, waits 0.5 s for old projected/camera frames to
+  clear, and votes physical ink over three seconds. No title, progress text, or
+  pointer rings appear during scanning. The resulting geometry stays fixed across
+  rounds; lasers remain live. A new match scans again.
+- User rejected the gentle servo trial as insufficient to dispense. Restore the
+  full calibrated 990→570→990 µs targets, 500 ms per phase, retaining radio safety,
+  cooldown and idle PWM shutdown. Actual boards must be reflashed individually.

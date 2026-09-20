@@ -42,6 +42,7 @@ class Scenario:
     missing_aim: bool = False
     press_edge: bool = False
     aim: tuple = (640, 360)
+    survey_until: float = 0.0
 
     def tick(self, fps):
         self.now += .1
@@ -59,6 +60,9 @@ class Scenario:
     def flip(self):
         state = sys._getframe(1).f_locals
         mode = state['mode']
+        if mode == 'survey_match':
+            pixels = pygame.surfarray.array3d(pygame.display.get_surface())
+            assert (pixels == 255).all(), 'Scan projection must be blank, including cursor rings'
         if not self.history or self.history[-1][0] != mode:
             self.history.append((mode, state['elapsed']))
 
@@ -68,11 +72,16 @@ class Scenario:
     def cancel_calibration(self):
         self.calibrated = True
 
+    def begin_survey(self):
+        self.survey_until = self.now + .5
+
     def run(self):
         self.game = Mock(phase='playing', scores={})
         self.game.update.return_value = []
         self.game.draw.side_effect = lambda surface: surface.fill((224, 239, 241))
         self.vision = Mock()
+        self.vision.begin_survey.side_effect = self.begin_survey
+        self.vision.surveying.side_effect = lambda: self.now < self.survey_until
         self.vision.snapshot.side_effect = lambda: VisionSnapshot(
             timestamp=self.now if self.fresh else self.now - 1, calibrated=self.calibrated)
         self.vision.begin_calibration.side_effect = self.begin_calibration
@@ -254,8 +263,8 @@ def main():
     pygame_mouse_at = (0, 0)  # Where the dummy video driver reports the mouse.
     result = Scenario(lifecycle).run()
     assert [mode for mode, elapsed in result.history] == [
-        'ready', 'countdown', 'game', 'pause', 'lobby',
-        'ready', 'countdown', 'game', 'lobby']
+        'ready', 'survey_match', 'countdown', 'game', 'pause', 'lobby',
+        'ready', 'survey_match', 'countdown', 'game', 'lobby']
     assert result.game.new_match.call_count == 3
     for index, (mode, elapsed) in enumerate(result.history):
         if mode == 'countdown':
@@ -297,7 +306,7 @@ def main():
     bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '2'], active=[])
     bench.run()
     modes = [mode for mode, elapsed in bench.history]
-    assert modes == ['calibration', 'countdown', 'game'], modes
+    assert modes == ['calibration', 'survey_match', 'countdown', 'game'], modes
     bench.bridge.start.assert_not_called()
     bench.vision.start.assert_called_once()
     assert bench.game.new_match.call_count == 2, 'One startup match plus one built from the board scan'

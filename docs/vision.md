@@ -268,3 +268,9 @@ subsequent production run. Duplicate production, relay and game launches were
 physically attempted and rejected without disturbing the original processes.
 V4L2 manual exposure enum 1 and exposure value 300 were accepted and read back.
 Lighting-transition and moving-laser validation still require physical tests.
+
+The fixed match scan now uses a blank white projection, a 0.5-second settling
+period, and three seconds of strict-majority ink voting. Scanning starts after
+both players ready and repeats on replay; no title, status text, or pointer rings
+are projected during it. Old in-flight wall jobs are rejected by generation.
+This avoids freezing menu artwork into the match's physical geometry.

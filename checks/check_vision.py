@@ -358,6 +358,37 @@ def check_identity():
     assert crossing.update([(145, 100), (95, 100)], 3.0)[0] == {}, "Stale identities cannot reacquire from motion"
 
 
+def check_blank_survey():
+    width, height = 320, 180
+    vision = Vision({"display": {"width": width, "height": height}})
+    vision.matrix = np.eye(3)
+    blank = np.full((height, width, 3), 200, np.uint8)
+    ink = blank.copy()
+    ink[75:85, 120:200] = 10
+    noisy = ink.copy()
+    noisy[100:110, 120:200] = 10
+    old = np.ones((height, width), bool)
+    vision.walls = vision.wall_filter.seed(old)
+    with patch("beaver_battle.vision.monotonic", return_value=10.0):
+        vision.begin_survey(0.3)
+    generation = vision.calibration_generation
+    reference = np.full(blank.shape, 250, np.float32)
+    gain = np.array([200, 200, 200], np.float32)
+    canvas = np.zeros(blank.shape, np.uint8)
+    vision.board_gain = gain
+    vision.process_walls(noisy, 10.2, vision.matrix, reference, gain, canvas, generation)
+    assert vision.survey_samples == 0, "Projected menu frames must settle before scanning"
+    vision.process_walls(noisy, 10.5, vision.matrix, reference, gain, canvas, generation - 1)
+    assert vision.survey_samples == 0, "Old in-flight work cannot enter a new survey"
+    for frame, timestamp in ((noisy, 10.5), (ink, 10.6), (ink, 10.81)):
+        vision.process_walls(frame, timestamp, vision.matrix, reference, gain, canvas, generation)
+    assert not vision.surveying()
+    assert vision.walls[80, 150] and not vision.walls[105, 150], "Majority keeps ink and rejects transient noise"
+    assert vision.latest.walls is vision.walls, "Completed walls publish before survey completion is exposed"
+    assert vision.board_gain is gain and vision.board_reference is not None
+    assert vision.walls.mean() < 0.05, "Stale menu compensation must not enter the blank-board scan"
+
+
 def check_fast_tracking():
     # Keep two identities well separated vertically while they sweep and reverse.
     def seeded_tracker(**settings):
@@ -753,11 +784,12 @@ check_candidates()
 check_laser_on_a_whiteboard()
 check_identity()
 check_fast_tracking()
+check_blank_survey()
 check_walls()
 check_early_aims()
 check_wall_worker()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, laser dot on a whiteboard, drawn ink by pen colour, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, laser dot on a whiteboard, drawn ink by pen colour, blank-board survey, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")
