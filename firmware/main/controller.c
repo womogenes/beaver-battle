@@ -5,6 +5,43 @@ bool laser_bench_level(bool steady, bool pulse, uint64_t elapsed_ms)
     return pulse ? elapsed_ms % 500 < 250 : steady;
 }
 
+uint32_t laser_identity_period_ms(int controller_id)
+{
+    /* Three periods in the ratio 3:4:5, so none is a harmonic of another and a camera
+       cannot mistake one for a multiple of the next. */
+    switch (controller_id) {
+    case 2:
+        return 800;
+    case 3:
+        return 1000;
+    default:
+        return 600;
+    }
+}
+
+uint32_t laser_identity_gap_ms(int controller_id)
+{
+    /* The gap is a fixed share of the period, not a fixed number of milliseconds. One
+       fixed gap made the longest period the weakest: 133 ms is 22 percent of 600 but only
+       13 percent of 1000, so the longest period carried the least signal to correlate and
+       was identified correctly on 88 percent of three second windows where the shortest
+       managed 100. Holding the share constant brings all three to 100. */
+    return laser_identity_period_ms(controller_id) * 22 / 100;
+}
+
+bool laser_identity_level(int controller_id, uint32_t gap_ms, uint64_t elapsed_ms)
+{
+    /* Lit except for one short blanking gap per period. The camera identifies a
+       controller from how often the gap comes round, not from how long the laser is on:
+       a missed frame looks exactly like a gap, so any measure of duty is confounded by
+       tracking dropouts, while random dropouts leave the period where it was. */
+    uint32_t period = laser_identity_period_ms(controller_id);
+    if (gap_ms == 0 || gap_ms >= period) {
+        return true;
+    }
+    return (uint32_t)(elapsed_ms % period) >= gap_ms;
+}
+
 bool serial_newer(uint32_t candidate, uint32_t previous)
 {
     uint32_t distance = candidate - previous;

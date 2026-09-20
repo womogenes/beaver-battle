@@ -25,7 +25,7 @@
 
 #include "controller.h"
 
-enum { LASER_GPIO = 25, SERVO_GPIO = 26, FIRE_GPIO = CONFIG_BB_FIRE_GPIO,
+enum { LASER_GPIO = 25, SERVO_GPIO = 33, FIRE_GPIO = CONFIG_BB_FIRE_GPIO,
        SPECIAL_GPIO = CONFIG_BB_SPECIAL_GPIO,
        WIFI_READY = BIT0, HEARTBEAT_MS = 20, LOOP_MS = 5, PACKET_CAPACITY = 512 };
 
@@ -39,7 +39,7 @@ static uint64_t time_ms(void)
 
 static bool servo_enabled(void)
 {
-#if !defined(CONFIG_BB_LASER_BUTTON_TEST) && (defined(CONFIG_BB_SERVO_ENABLED) || defined(CONFIG_BB_SERVO_BUTTON_TEST))
+#if defined(CONFIG_BB_SERVO_BUTTON_TEST) || (!defined(CONFIG_BB_LASER_BUTTON_TEST) && defined(CONFIG_BB_SERVO_ENABLED))
     return true;
 #else
     return false;
@@ -147,12 +147,31 @@ static void laser_button_test(void)
     bool previous_pulse = false;
     uint64_t pulse_started = 0;
     uint64_t next_status_ms = 0;
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+    uint32_t pulse_us = 1500;
+    uint64_t next_step_ms = time_ms() + 20;
+    ESP_LOGI(log_tag, "SERVO GPIO%d: GPIO%d lowers, GPIO%d raises; both/neither hold; limits %d..%d us; step %d us / 20 ms",
+             SERVO_GPIO, FIRE_GPIO, SPECIAL_GPIO, CONFIG_BB_SERVO_TEST_MIN_US,
+             CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+#endif
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; servo disabled; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
+    ESP_LOGI(log_tag, "LASER BUTTON TEST: GPIO%d steady; GPIO%d 2 Hz pulse (wins if both held); release both OFF; no Wi-Fi", FIRE_GPIO, SPECIAL_GPIO);
     ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
     while (true) {
         uint64_t now = time_ms();
         buttons_read(&fire, &special, now);
+#ifdef CONFIG_BB_SERVO_BUTTON_TEST
+        if (now >= next_step_ms) {
+            next_step_ms = now + 20;
+            uint32_t requested_pulse = servo_jog(pulse_us, fire.pressed, special.pressed,
+                CONFIG_BB_SERVO_TEST_MIN_US, CONFIG_BB_SERVO_TEST_MAX_US, CONFIG_BB_SERVO_TEST_STEP_US);
+            if (requested_pulse != pulse_us) {
+                pulse_us = requested_pulse;
+                servo_pulse(pulse_us);
+                ESP_LOGI(log_tag, "SERVO GPIO%d %" PRIu32 " us", SERVO_GPIO, pulse_us);
+            }
+        }
+#endif
         if (special.pressed && !previous_pulse) {
             pulse_started = now;
         }
@@ -169,6 +188,45 @@ static void laser_button_test(void)
                      SPECIAL_GPIO, gpio_get_level(SPECIAL_GPIO), special.pressed ? "PRESSED" : "released",
                      LASER_GPIO, laser ? "ON" : "OFF");
             next_status_ms = now + 500;
+        }
+        vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
+    }
+}
+#endif
+
+#ifdef CONFIG_BB_LASER_IDENTITY_TEST
+static void laser_identity_test(void)
+{
+    Button fire = {0};
+    Button special = {0};
+    bool laser = false;
+    uint64_t pressed_at = 0;
+    uint64_t next_status_ms = 0;
+    TickType_t wake_tick = xTaskGetTickCount();
+    ESP_LOGI(log_tag, "LASER IDENTITY TEST: controller %d, %" PRIu32 " ms period, %d ms gap; hold GPIO%d to fire; no Wi-Fi",
+             CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
+             laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID), FIRE_GPIO);
+    ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
+    while (true) {
+        uint64_t now = time_ms();
+        /* Nothing lights the laser but a held button, at power-up or ever. */
+        if (buttons_read(&fire, &special, now) && fire.pressed) {
+            pressed_at = now;   /* the pattern starts where the press does */
+        }
+        uint32_t gap = CONFIG_BB_LASER_IDENTITY_GAP_MS > 0
+            ? (uint32_t)CONFIG_BB_LASER_IDENTITY_GAP_MS
+            : laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID);
+        bool requested = fire.pressed &&
+            laser_identity_level(CONFIG_BB_CONTROLLER_ID, gap, now - pressed_at);
+        if (requested != laser) {
+            output_update(requested, false);
+            laser = requested;
+        }
+        if (now >= next_status_ms) {
+            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %" PRIu32 " ms, FIRE %s, laser %s",
+                     CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
+                     gap, fire.pressed ? "HELD" : "released", laser ? "ON" : "OFF");
+            next_status_ms = now + 2000;
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
     }
@@ -313,6 +371,9 @@ void app_main(void)
 #endif
 #ifdef CONFIG_BB_SERVO_BUTTON_TEST
     servo_button_test();
+#endif
+#ifdef CONFIG_BB_LASER_IDENTITY_TEST
+    laser_identity_test();
 #endif
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {

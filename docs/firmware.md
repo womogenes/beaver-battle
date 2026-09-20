@@ -89,8 +89,8 @@ The current rewired bench board uses `CONFIG_BB_FIRE_GPIO=14` (D14 steady)
 and `CONFIG_BB_SPECIAL_GPIO=27` (D27 pulse), with the laser gate still D25.
 Both buttons connect their GPIO to GND. Set these options in the ignored local
 sdkconfig; shared defaults remain GPIO27/GPIO32 for earlier controllers.
-The servo is always disabled, and
-the test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
+The servo is disabled unless the servo bench option is also enabled.
+The test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
 TEST** and logs `LASER GPIO25 ON` / `LASER GPIO25 OFF` transitions alongside
 button events. Every 500 ms, `BUTTON STATUS` also reports both raw GPIO levels
 (0 means pressed, 1 released), debounced button states, and commanded laser
@@ -100,10 +100,9 @@ Disable this option and rebuild/flash to restore normal game
 operation and its laptop-controlled laser lease. The option defaults off in
 the shared project; a board's ignored local sdkconfig can enable it for testing.
 
-For a positional-servo direction test, first disable the laser bench option,
-then enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
-rebuild/flash. GPIO26 produces 50 Hz pulses starting at 1500 microseconds. Hold
-FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. The default
+For a positional-servo direction test, enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
+rebuild/flash. GPIO33 produces 50 Hz pulses starting at 1500 microseconds. Hold
+FIRE to lower the pulse; hold SPECIAL to raise it (currently D14 and D27). The default
 step is 5 microseconds every 20 ms (250 microseconds/second);
 `BB_SERVO_TEST_STEP_US` adjusts command speed from 1 to 100 microseconds per
 20 ms. For example, a 25-microsecond step commands 1250 microseconds/second:
@@ -116,10 +115,17 @@ adjust the limits during calibration. These are bounded pulse-width calibration
 settings, not an angle mapping or a promise of full 180-degree travel. Actual
 rotation direction depends on the
 servo and mounting; this mode assumes a positional servo, not a continuous
-rotation servo. The laser stays off and Wi-Fi/UDP do not start. Serial output
+rotation servo. The laser stays off unless the laser bench option is also enabled. Wi-Fi/UDP do not start. Serial output
 identifies **SERVO BUTTON TEST**, reports button edges and the current pulse
-width. The two bench modes are mutually exclusive and both default off. Disable
-the servo bench option and rebuild/flash to return to normal game operation.
+width. Both options default off; enabling both combines their behavior. Disable
+both bench options and rebuild/flash to return to normal game operation.
+
+Current combined test settings: D14 gives steady laser and lowers the servo
+pulse; D27 pulses the laser at 2 Hz and raises the servo pulse. D33 carries
+the servo signal. Both buttons hold servo position while the laser pulses;
+neither holds servo position with laser off. The local build uses 544–2400 us
+limits and 50 us steps every 20 ms, twice the preceding 25 us jog rate.
+This doubles commanded speed, not necessarily the motor’s physical speed.
 
 The serial monitor at 115200 baud reports every debounced button transition,
 including when Wi-Fi is unconfigured or disconnected. For example:
@@ -159,7 +165,7 @@ establishes current state and consumes any included feedback ID without firing;
 this prevents effects accumulated while disconnected from replaying. The laptop
 must send a fresh event ID afterward to request a new press.
 
-Servo output is **disabled by default**: GPIO26 remains low and no PWM pulses are
+Servo output is **disabled by default**: GPIO33 remains low and no PWM pulses are
 sent. This does not physically put an attached mechanism at rest. Once enabled,
 startup and connection loss command `CONFIG_BB_SERVO_REST_US`; movement uses
 `CONFIG_BB_SERVO_PRESS_US`. The defaults of 1500 and 1600 microseconds are
@@ -198,4 +204,62 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
-latency, power, and mechanical return still require the bench checks above.
+## Identity blink bench test
+
+`BB_LASER_IDENTITY_TEST` drives the laser continuously with this controller's identity
+pattern and nothing else: no buttons, no Wi-Fi, servo disabled. The laser is lit except
+for one gap of `BB_LASER_IDENTITY_GAP_MS` at the start of each period, and the period is
+600, 800 or 1000 ms for controller 1, 2 or 3. Those are in the ratio 3:4:5 so that no
+period is a harmonic of another.
+
+The camera identifies a controller from how often the gap comes round, never from how
+much of the time the laser is lit. A frame where tracking simply missed the dot looks
+exactly like a gap, so any measure of duty is confounded by dropouts, while random
+dropouts leave the period where it is and only lower the confidence in it.
+
+Measured on the bench with a flashed controller held on the board for 16 seconds, at
+30 fps: the dark runs came back at a median of exactly 133 ms, the programmed gap, and
+autocorrelation recovered the period as exactly 600 ms. Correlation at controller 1's own
+period was +0.70 against -0.21 and -0.18 at the other two candidates, so the right answer
+is strongly positive while the wrong ones are negative rather than merely smaller.
+
+Identifying the controller from a sliding window of that capture: 92 percent right from
+one second, 97 from one and a half, 100 percent from three seconds with the winning
+period beating the runner-up by 0.68. That is better than the simulation predicted.
+
+The dot was seen on 72 percent of frames, against a programmed duty of 78, so a few
+frames were lost beyond the gaps themselves and the lit runs came back at 333 ms rather
+than 467. Identification was unaffected, which is the whole reason for keying on period
+rather than duty: dropouts lower the correlation peak without moving it.
+
+Controller 3, the case the fixed gap had made weakest, was then flashed and measured on
+the board: the dot was found on 79 percent of frames against a ceiling of 78, so on every
+frame it should have been lit; dark runs came back at a median of 200 ms against the
+programmed 220; correlation at its own period was +0.91 against -0.23 and -0.20 at the
+other two; and identification was correct on 100 percent of windows two seconds long.
+Position held to 2.8 px median error with 3.0 px of jitter, better than controller 1.
+
+Beware of measuring a window in which nobody was holding the button. Several runs while
+setting this up read as a weak or failing laser, and the laser was simply not lit; a
+measurement of laser strength is only meaningful alongside evidence the laser was on.
+
+The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
+`BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
+longest period the smallest share and therefore the least signal to correlate: simulated at
+the dropout rate measured on the bench, a fixed 133 ms identified controller 3 correctly on
+88 percent of three second windows where controller 1 managed 100. Holding the share
+constant brings all three to 99 or 100 with equal margins, at no extra cost to controller 1,
+whose gap is unchanged.
+
+Three sketches, one per controller, live under `firmware/arduino/`. They differ in the
+controller number and nothing else, which `checks.check_blink` enforces alongside comparing
+all three against the compiled firmware functions.
+
+The original 133 ms was four frames at 30 fps. Simulating the measured tracking reliability,
+four frames identified the right controller from a three second window on 99 percent of
+trials while the dot was held steady, against 90 percent for a three frame gap; at the 44
+percent detection measured while sweeping the dot quickly, neither is dependable at any
+window length, so identity should be taken while a player is reasonably still and then
+carried by ordinary motion tracking.
+
+## Checks
