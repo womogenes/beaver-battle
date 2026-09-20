@@ -89,8 +89,8 @@ The current rewired bench board uses `CONFIG_BB_FIRE_GPIO=14` (D14 steady)
 and `CONFIG_BB_SPECIAL_GPIO=27` (D27 pulse), with the laser gate still D25.
 Both buttons connect their GPIO to GND. Set these options in the ignored local
 sdkconfig; shared defaults remain GPIO27/GPIO32 for earlier controllers.
-The servo is always disabled, and
-the test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
+The servo is disabled unless the servo bench option is also enabled.
+The test runs without starting Wi-Fi or UDP. Startup identifies **LASER BUTTON
 TEST** and logs `LASER GPIO25 ON` / `LASER GPIO25 OFF` transitions alongside
 button events. Every 500 ms, `BUTTON STATUS` also reports both raw GPIO levels
 (0 means pressed, 1 released), debounced button states, and commanded laser
@@ -100,10 +100,9 @@ Disable this option and rebuild/flash to restore normal game
 operation and its laptop-controlled laser lease. The option defaults off in
 the shared project; a board's ignored local sdkconfig can enable it for testing.
 
-For a positional-servo direction test, first disable the laser bench option,
-then enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
+For a positional-servo direction test, enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
 rebuild/flash. GPIO33 produces 50 Hz pulses starting at 1500 microseconds. Hold
-FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. The default
+FIRE to lower the pulse; hold SPECIAL to raise it (currently D14 and D27). The default
 step is 5 microseconds every 20 ms (250 microseconds/second);
 `BB_SERVO_TEST_STEP_US` adjusts command speed from 1 to 100 microseconds per
 20 ms. For example, a 25-microsecond step commands 1250 microseconds/second:
@@ -116,10 +115,17 @@ adjust the limits during calibration. These are bounded pulse-width calibration
 settings, not an angle mapping or a promise of full 180-degree travel. Actual
 rotation direction depends on the
 servo and mounting; this mode assumes a positional servo, not a continuous
-rotation servo. The laser stays off and Wi-Fi/UDP do not start. Serial output
+rotation servo. The laser stays off unless the laser bench option is also enabled. Wi-Fi/UDP do not start. Serial output
 identifies **SERVO BUTTON TEST**, reports button edges and the current pulse
-width. The two bench modes are mutually exclusive and both default off. Disable
-the servo bench option and rebuild/flash to return to normal game operation.
+width. Both options default off; enabling both combines their behavior. Disable
+both bench options and rebuild/flash to return to normal game operation.
+
+Current combined test settings: D14 gives steady laser and lowers the servo
+pulse; D27 pulses the laser at 2 Hz and raises the servo pulse. D33 carries
+the servo signal. Both buttons hold servo position while the laser pulses;
+neither holds servo position with laser off. The local build uses 544–2400 us
+limits and 50 us steps every 20 ms, twice the preceding 25 us jog rate.
+This doubles commanded speed, not necessarily the motor’s physical speed.
 
 The serial monitor at 115200 baud reports every debounced button transition,
 including when Wi-Fi is unconfigured or disconnected. For example:

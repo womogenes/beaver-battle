@@ -28,12 +28,13 @@ config BB_LASER_DUTY
     default 1023
 
 config BB_LASER_BUTTON_TEST
-    bool "Laser button bench test (no Wi-Fi, servo disabled)"
+    bool "Laser button bench test (no Wi-Fi)"
     default n
     help
         Hold FIRE for steady laser output, SPECIAL for 2 Hz flashing (250 ms
         on, 250 ms off). SPECIAL wins if both are held. Release both for off.
         Disable this option and rebuild to restore game operation.
+        Enable Servo button bench test too for simultaneous servo jogging.
 
 config BB_LASER_IDENTITY_TEST
     bool "Laser identity blink bench test (no Wi-Fi, servo disabled)"
@@ -77,13 +78,13 @@ config BB_SERVO_ENABLED
         calibrated. When disabled GPIO33 stays low and no servo pulse is sent.
 
 config BB_SERVO_BUTTON_TEST
-    bool "Servo button bench test (no Wi-Fi, laser off)"
-    depends on !BB_LASER_BUTTON_TEST && !BB_LASER_IDENTITY_TEST
+    bool "Servo button bench test (no Wi-Fi)"
     default n
     help
         Start at 1500 us. Hold FIRE to lower the pulse or SPECIAL to raise it.
         Neither or both buttons hold the current position. Disable this option
         and rebuild to restore game operation.
+        Laser stays off unless Laser button bench test is also enabled.
 
 config BB_SERVO_TEST_MIN_US
     int "Servo bench minimum pulse (microseconds)"

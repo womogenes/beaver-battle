@@ -13,6 +13,10 @@ int main(void)
     assert(!laser_bench_level(true, true, 499));
     assert(laser_bench_level(false, true, 500));
     assert(!laser_bench_level(false, false, 500));
+    assert(servo_jog(1500, true, false, 544, 2400, 50) == 1450);
+    assert(servo_jog(1500, false, true, 544, 2400, 50) == 1550);
+    assert(servo_jog(560, true, false, 544, 2400, 50) == 544);
+    assert(servo_jog(2380, false, true, 544, 2400, 50) == 2400);
 
     /* Identity blink: lit except for one gap per period, unique period per controller. */
     assert(laser_identity_period_ms(1) == 600);
