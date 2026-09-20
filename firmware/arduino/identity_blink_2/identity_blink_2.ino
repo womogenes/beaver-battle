@@ -13,7 +13,8 @@
 
 const int CONTROLLER_ID = 2;      // 1, 2 or 3, unique per controller
 const int LASER_GPIO = 25;        // gate of the laser MOSFET, as in the ESP-IDF firmware
-const int FIRE_GPIO = 27;         // CONFIG_BB_FIRE_GPIO; switch connects the pin to GND
+const int FIRE_GPIO = 14;         // button one, CONFIG_BB_FIRE_GPIO; switch pulls to GND
+const int SPECIAL_GPIO = 27;      // button two, CONFIG_BB_SPECIAL_GPIO
 // GAP_MS comes from identityGapMs() below; a fixed gap starves the longest period.
 const uint32_t DEBOUNCE_MS = 15;  // BUTTON_DEBOUNCE_MS in controller.h
 
@@ -71,6 +72,7 @@ struct Button {
 };
 
 Button fire;
+Button special;
 uint32_t pressedAt = 0;
 bool lit = false;
 
@@ -78,9 +80,11 @@ void setup() {
   Serial.begin(115200);
   pinMode(LASER_GPIO, OUTPUT);
   digitalWrite(LASER_GPIO, LOW);      // dark at power-up, and until FIRE is held
-  pinMode(FIRE_GPIO, INPUT_PULLUP);   // switch pulls the pin to GND when pressed
-  Serial.printf("identity blink: controller %d, period %u ms, gap %u ms; hold GPIO%d to fire\n",
-                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), identityGapMs(CONTROLLER_ID), FIRE_GPIO);
+  pinMode(FIRE_GPIO, INPUT_PULLUP);      // switch pulls the pin to GND when pressed
+  pinMode(SPECIAL_GPIO, INPUT_PULLUP);
+  Serial.printf("identity blink: controller %d, period %u ms, gap %u ms; fire GPIO%d, special GPIO%d\n",
+                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), identityGapMs(CONTROLLER_ID),
+                FIRE_GPIO, SPECIAL_GPIO);
 }
 
 void loop() {
@@ -88,11 +92,15 @@ void loop() {
   if (fire.update(digitalRead(FIRE_GPIO) == LOW, now) && fire.pressed) {
     pressedAt = now;   // the pattern starts where the press does, so its phase is known
   }
+  // The second button drives no output here; reporting it is how its wiring gets checked.
+  if (special.update(digitalRead(SPECIAL_GPIO) == LOW, now)) {
+    Serial.printf("special %s\n", special.pressed ? "PRESSED" : "released");
+  }
   bool wanted = fire.pressed && identityLevel(CONTROLLER_ID, identityGapMs(CONTROLLER_ID), now - pressedAt);
   if (wanted != lit) {
     digitalWrite(LASER_GPIO, wanted ? HIGH : LOW);
     lit = wanted;
-    Serial.printf("laser %s\n", lit ? "ON" : "off");
+    Serial.printf("fire %s, laser %s\n", fire.pressed ? "held" : "released", lit ? "ON" : "off");
   }
   delay(2);   // well inside the 133 ms gap, so edges land within a frame
 }

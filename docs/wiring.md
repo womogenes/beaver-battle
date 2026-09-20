@@ -1,6 +1,6 @@
 # Controller wiring
 
-Use the GPIO labels printed on the classic ESP32 DevKit V1, not physical header positions. Assign distinct firmware IDs for game controllers. **Current rewired bench board:** steady laser button D14/GPIO14 to GND, pulsing button D27/GPIO27 to GND, laser gate D25/GPIO25. Set `CONFIG_BB_FIRE_GPIO=14` and `CONFIG_BB_SPECIAL_GPIO=27`. The diagram below shows the earlier GPIO27/GPIO32 button layout; use this override for the current board.
+Use the GPIO labels printed on the classic ESP32 DevKit V1, not physical header positions. Assign distinct firmware IDs for game controllers. Button one is D14/GPIO14 to GND, button two is D27/GPIO27 to GND, and the laser gate is D25/GPIO25. These are the firmware defaults, so no override is needed; the diagram still shows the earlier GPIO27/GPIO32 layout and is out of date on that point. A sketch or build that assumes the old pins reads button two as button one and sees nothing at all on button two, which is exactly what it looks like on the bench.
 
 ![Controller wiring with 9V converter and IRLZ44N](controller-wiring.svg)
 
@@ -12,8 +12,8 @@ All grounds connect together: battery negative, converter ground, ESP32 GND, MOS
 
 | Signal | Connection |
 | --- | --- |
-| Fire/thrust | GPIO27 → normally open button → GND |
-| Special | GPIO32 → normally open button → GND |
+| Fire/thrust (button one) | GPIO14 → normally open button → GND |
+| Special (button two) | GPIO27 → normally open button → GND |
 | Laser control | GPIO25 → 330 Ω gate resistor → N-channel MOSFET gate |
 | Servo signal | GPIO33 → servo signal input |
 | Common ground | ESP32 GND, MOSFET source, servo ground, external supply negative |
@@ -44,7 +44,7 @@ The available IRLZ44N is a switch, not a voltage or current regulator. Its speci
 
 ## Button monitor
 
-Flash the controller build, then open a 115200-baud serial monitor. Each press/release reports `FIRE GPIO27 PRESSED/RELEASED` or `SPECIAL GPIO32 PRESSED/RELEASED`. This works with empty Wi-Fi credentials. In the normal game build, the laser stays off without host commands, and servo output is disabled by default. Close the monitor before the next firmware upload.
+Flash the controller build, then open a 115200-baud serial monitor. Each press/release reports `FIRE GPIO14 PRESSED/RELEASED` or `SPECIAL GPIO27 PRESSED/RELEASED`. This works with empty Wi-Fi credentials. In the normal game build, the laser stays off without host commands, and servo output is disabled by default. Close the monitor before the next firmware upload.
 
 For the standalone laser test, enable `CONFIG_BB_LASER_BUTTON_TEST` as described in [firmware instructions](firmware.md). Holding either button turns GPIO25 on; releasing both turns it off after debounce. This mode does not use Wi-Fi or the game and always disables the servo. Disable the test option and reflash before returning to the game.
 
