@@ -200,7 +200,7 @@ def main():
 
     from beaver_battle.sound import SoundBoard
     sound = config.get('sound', {})
-    board = SoundBoard(sound.get('enabled', True) and not args.mute and not args.headless, sound.get('volume', .6), sound.get('music_volume', .35) if sound.get('music', True) else 0)
+    board = SoundBoard(sound.get('enabled', True) and not args.mute and not args.headless, sound.get('volume', .5), sound.get('music_volume', .55) if sound.get('music', True) else 0)
 
     def text_line(text, y, large=False, color=None):
         from beaver_battle import sprites

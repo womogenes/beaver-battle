@@ -91,7 +91,7 @@ def build():
 class SoundBoard:
     """Plays named effects through pygame.mixer; silent, never failing, when there is no audio device."""
 
-    def __init__(self, enabled=True, volume=.6, music=.35):
+    def __init__(self, enabled=True, volume=.5, music=.55):
         self.sounds = {}
         if not enabled:
             return

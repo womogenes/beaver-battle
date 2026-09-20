@@ -87,6 +87,6 @@ duration_ms = 200
 
 [sound]
 enabled = true
-volume = 0.6
+volume = 0.5
 music = true
-music_volume = 0.35 # The theme sits under the effects; build it with checks/build_music.py.
+music_volume = 0.55 # The theme sits under the effects; build it with checks/build_music.py.
