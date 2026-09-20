@@ -147,7 +147,7 @@ again.new_match((1, 2), (), 6)
 assert [tuple(place) for place, size in again.trees] != [tuple(place) for place, size in game.trees]
 first, second = Treasure(config), Treasure(config)
 for solo_game in (first, second, second):
-    solo_game.new_match((1,), (), 9, solo=True)
+    solo_game.new_match((1,), (), 0, solo=True)
 assert [tuple(place) for place, size in first.trees] == [tuple(place) for place, size in second.trees]
 assert not np.array_equal(first.water, first.water[:, ::-1]), "one-player boards need not be symmetric"
 
@@ -220,17 +220,18 @@ for step in range(60 * 40):
             assert all(deer.pos.distance_to(pad) > 40 for pad in [runner.start for runner in game.runners.values()] + [game.chest])
 assert any(deer.pos.distance_to(deer.target) > 1 or deer.wait > 0 for deer in game.deer)
 
-# Solo: one beaver crosses the whole board, edge to edge, on the clock, on every board, the lopsided ones included.
-for index in range(len(BOARDS) + len(SOLO_BOARDS)):
+# Solo: one beaver crosses the whole board, edge to edge, on the clock, on each of the three maps, which are mostly water.
+for index in range(len(SOLO_BOARDS)):
     game = Treasure(config)
     game.new_match((1,), (1,), index, solo=True)
     assert game.rock_at(game.chest, 40) is None and not game.in_water(game.chest) and game.blocked_at(game.runners[1].start, 30) is None
+    assert game.water.mean() > .12, f"{game.board['name']}: one player's maps are broad water"
     assert len(game.runners) == 1 and game.chest.x > game.width * .85 and game.runners[1].start.x < game.width * .15
     elapsed = 0.0
     while game.phase != "match_over" and elapsed < 120:
         game.update(1 / 60, {})
         elapsed += 1 / 60
-    assert game.winner == 1 and game.verdict == f"{game.race_time:.2f} s" and 5 < game.race_time < 25, (game.board["name"], game.verdict)
+    assert game.winner == 1 and game.verdict == f"{game.race_time:.2f} s" and 5 < game.race_time < 32, (game.board["name"], game.verdict)
 game = Treasure(config)
 game.new_match((1,), (), 0, solo=True)
 run(game, config["treasure"]["draw_seconds"] + config["treasure"]["check_seconds"] + .3)

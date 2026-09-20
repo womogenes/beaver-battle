@@ -42,19 +42,22 @@ BOARDS = [
 
 # One player crosses the whole board, so these need not be symmetric: written edge to edge, never mirrored.
 SOLO_BOARDS = [
+    # Ponds here are drawn at their written size (no shrinking), as broad connected water.
     {"name": "THE BIG RIVER", "whole": True, "deer": 2,
-     "rocks": [(.25, .40, .04), (.30, .70, .04), (.72, .35, .04), (.70, .68, .04), (.40, .22, .035), (.62, .84, .035)],
-     "ponds": [(.5, .14, .055, .13), (.49, .34, .075, .15), (.51, .56, .085, .15), (.49, .78, .075, .15), (.5, .95, .055, .1), (.2, .8, .06, .09), (.8, .25, .06, .09)],
-     "portals": [((.34, .20), (.66, .86))]},
+     "rocks": [(.25, .40, .04), (.30, .72, .04), (.74, .34, .04), (.70, .70, .04), (.38, .20, .035), (.62, .86, .035)],
+     "ponds": [(.50, .08, .07, .14), (.47, .26, .085, .16), (.52, .46, .095, .17), (.48, .66, .09, .17), (.53, .86, .08, .17),
+               (.28, .86, .11, .10), (.38, .90, .09, .08), (.74, .14, .10, .09)],
+     "portals": [((.30, .20), (.70, .88))]},
     {"name": "DEER PARK", "whole": True, "deer": 6, "boosts": 5,
-     "rocks": [(.22, .30, .035), (.35, .66, .035), (.5, .40, .04), (.64, .70, .035), (.78, .34, .035)],
-     "ponds": [(.30, .42, .06, .10), (.58, .56, .07, .11), (.74, .80, .06, .09), (.44, .84, .05, .08)]},
+     "rocks": [(.22, .30, .035), (.30, .74, .035), (.52, .16, .04), (.70, .76, .035), (.80, .32, .035)],
+     "ponds": [(.50, .52, .15, .21), (.40, .40, .10, .14), (.60, .66, .11, .15), (.50, .80, .07, .13), (.50, .95, .06, .10),
+               (.30, .30, .07, .08), (.72, .50, .08, .07)]},
     {"name": "PORTAL WOODS", "whole": True, "deer": 2, "trees": 4,
-     "rocks": [(.5, y, .034) for y in (.2, .31, .42, .64, .75, .86)] + [(.30, .53, .035), (.70, .53, .035)],
-     "ponds": [(.5, .53, .05, .08), (.36, .28, .06, .09), (.66, .80, .06, .09)],
-     "portals": [((.24, .84), (.60, .22)), ((.40, .20), (.78, .82))]},
+     "rocks": [(.30, .53, .035), (.72, .50, .035), (.46, .84, .034), (.56, .20, .034)],
+     "ponds": [(.22, .12, .10, .12), (.32, .24, .09, .12), (.42, .36, .09, .12), (.51, .49, .09, .12), (.60, .62, .09, .12),
+               (.69, .75, .09, .12), (.79, .88, .10, .12)],
+     "portals": [((.20, .80), (.62, .30)), ((.40, .66), (.80, .66))]},
 ]
-
 
 def mirrored(items):
     return [item for item in items] + [(1 - item[0], *item[1:]) for item in items if abs(item[0] - .5) > 1e-6]
@@ -76,6 +79,9 @@ def scattered(board, shrink):
         if clear(x + side, y + lift, r * shrink):
             rocks.append((x + side, y + lift, r * shrink * .8))
     for index, (x, y, rx, ry) in enumerate(board.get("ponds", [])):
+        if whole:
+            ponds.append((x, y, rx, ry))  # One player's water is one broad body: full size, and no stray puddles.
+            continue
         ponds.append((x, y, rx * shrink, ry * shrink))
         side, lift = (-.062 if index % 2 else .062), (-.13 if index % 2 else .13)
         if clear(x + side, y + lift, max(rx, ry * 9 / 16) * shrink):
@@ -265,7 +271,8 @@ class Treasure:
         self.begin_drawing()
 
     def board_list(self, solo):
-        return BOARDS + SOLO_BOARDS if solo else BOARDS
+        """Two players share eight mirrored boards. One player picks from three maps, each with its own leaderboard."""
+        return SOLO_BOARDS if solo else BOARDS
 
     def decorate(self, whole):
         """Scatter trees, logs, boost clusters and deer. In a duel the fixed things are placed on one half
@@ -302,7 +309,7 @@ class Treasure:
                 point = None
             if point is not None:
                 pairs = [(point - arm, point + arm)] if whole else [(point - arm, point + arm), (pygame.Vector2(self.width - (point - arm).x, (point - arm).y), pygame.Vector2(self.width - (point + arm).x, (point + arm).y))]
-                self.logs += [(first, second, 17 * unit) for first, second in pairs]
+                self.logs += [(first, second, 7 * unit) for first, second in pairs]
                 if not self.passable():
                     del self.logs[-len(pairs):]
         for index in range(self.board.get("boosts", self.setting("boost_clusters", 2)) * half):
@@ -320,7 +327,7 @@ class Treasure:
         return all(len(self.bot_plan(runner)) > 2 for runner in self.runners.values())
 
     def blocked_at(self, point, slack=0.0):
-        """A rock, a tree trunk or a log in the way. Art is rough, so a line may graze an edge and get by."""
+        """A rock, a tree trunk or a fallen stick in the way. Art is rough, so a line may graze an edge and get by."""
         for center, radius in self.rocks:
             if point.distance_to(center) < radius * .82 + slack:
                 return center
@@ -689,7 +696,7 @@ class Treasure:
             surface.blit(sheet, (0, 0))
         for first, second, half in self.logs:
             along = second - first
-            image = sprites.timber(along.length() / unit + 2 * half / unit, 2.1 * half / unit, unit, seed=round(first.x + first.y))
+            image = sprites.stick(round(along.length() / unit), round(2 * half / unit), unit, seed=round(first.x + first.y))
             image = pygame.transform.rotozoom(image, -math.degrees(math.atan2(along.y, along.x)), 1)
             surface.blit(image, image.get_rect(center=(first + second) / 2))
         for index, (center, radius) in enumerate(self.rocks):
@@ -716,7 +723,7 @@ class Treasure:
                     angle = self.clock * 3.2 + spoke * math.tau / 3
                     pygame.draw.circle(frame, sprites.INK, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 5 * unit)
                     pygame.draw.circle(frame, sprites.WHITE, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 3 * unit)
-        token = self.sprite(("token",), lambda: sprites.boost_token(16 * unit))
+        token = self.sprite(("token",), lambda: sprites.berries(17 * unit))
         for index, (place, alive) in enumerate(self.boosts):
             if alive:
                 frame.blit(token, token.get_rect(center=place + pygame.Vector2(0, 3 * unit * math.sin(self.clock * 5 + index))))

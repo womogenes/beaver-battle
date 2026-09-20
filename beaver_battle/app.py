@@ -145,7 +145,7 @@ def main():
     from beaver_battle import sprites
     from beaver_battle.game import Game
     from beaver_battle.leaderboard import Leaderboard
-    from beaver_battle.treasure import BOARDS, SOLO_BOARDS, Treasure
+    from beaver_battle.treasure import SOLO_BOARDS, Treasure
     from beaver_battle.vision import Vision
 
     pygame.init()
@@ -203,6 +203,7 @@ def main():
     chosen = args.game or 'battle'
     games = ('battle', 'treasure')  # One or two players is a question inside Treasure Dash, not a third game.
     count_pick, count_rects = 1, []
+    map_pick, map_rects, map_views = 0, [], {}
     scores = Leaderboard(config.get('treasure', {}).get('leaderboard_file', 'leaderboard.json'))
     solo_board, recorded = 0, False
     next_button = pygame.Rect(0, 0, 300, 66)
@@ -346,25 +347,58 @@ def main():
         text_line('Click, press 1 or 2, or use the arrow keys and Enter.  Esc goes back.' if args.simulate
                   else 'Click, or button 1 to switch and button 2 to choose', height - 46)
 
-    def draw_scores():
-        """Today's fastest one-player crossings, board by board."""
+    def draw_maps():
+        """One player picks a map. Each card shows the map itself and today's time to beat on it."""
+        map_rects.clear()
         screen.fill((224, 239, 241))
-        text_line("TODAY'S BEST TIMES", 14, True)
-        layouts = BOARDS + SOLO_BOARDS
-        for index, layout in enumerate(layouts):
-            panel = pygame.Rect(0, 0, 590, 80)
-            panel.center = (width // 2 + (index % 2 * 2 - 1) * 305, 176 + index // 2 * 90)
-            pygame.draw.rect(screen, sprites.BLUE, panel.inflate(8, 8), border_radius=24)
-            pygame.draw.rect(screen, sprites.WHITE, panel, border_radius=20)
-            title = sprites.lettering(layout['name'], 26, sprites.BLUE_BRIGHT, 1)
-            screen.blit(title, title.get_rect(midleft=(panel.x + 20, panel.y + 24)))
-            rows = scores.top(layout['name'], 2)
+        text_line('PICK A MAP', 22, True)
+        for index, layout in enumerate(SOLO_BOARDS):
+            card = pygame.Rect(0, 0, 392, 400)
+            card.center = (width // 2 + (index - 1) * 412, height // 2 + 40)
+            map_rects.append(card)
+            picked = index == map_pick
+            pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 8, 20 if picked else 8), border_radius=38)
+            pygame.draw.rect(screen, sprites.WHITE, card, border_radius=32)
+            if index not in map_views:
+                # The real board, shrunk: what you see is what you will play.
+                sample = Treasure(config)
+                sample.new_match((1,), (), index, solo=True)
+                map_views[index] = pygame.transform.smoothscale(sample.ground(), (356, 200))
+            scene = pygame.Rect(card.x + 18, card.y + 18, 356, 200)
+            screen.blit(map_views[index], scene)
+            pygame.draw.rect(screen, sprites.BLUE, scene, 4, border_radius=6)
+            name = sprites.label(layout['name'], 40, sprites.BLUE_BRIGHT)
+            screen.blit(name, name.get_rect(center=(card.centerx, scene.bottom + 44)))
+            best = scores.top(layout['name'], 3)
+            if not best:
+                image = sprites.sign('No time yet today', 24, sprites.BLUE_BRIGHT)
+                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 104)))
+            for place, (name, seconds) in enumerate(best):
+                image = sprites.sign(f'{place + 1}.  {name}   {seconds:.2f} s', 25 if place == 0 else 21, sprites.BLUE if place == 0 else sprites.BLUE_BRIGHT)
+                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 90 + place * 30)))
+        text_line('Click a map, press 1, 2 or 3, or use the arrow keys and Enter.  Esc goes back.' if args.simulate
+                  else 'Click, or button 1 to switch and button 2 to choose', height - 46)
+
+    def draw_scores():
+        """Today's fastest one-player crossings, one leaderboard per map."""
+        screen.fill((224, 239, 241))
+        text_line("TODAY'S BEST TIMES", 22, True)
+        for index, layout in enumerate(SOLO_BOARDS):
+            panel = pygame.Rect(0, 0, 392, 420)
+            panel.center = (width // 2 + (index - 1) * 412, height // 2 + 50)
+            pygame.draw.rect(screen, sprites.BLUE, panel.inflate(8, 8), border_radius=36)
+            pygame.draw.rect(screen, sprites.WHITE, panel, border_radius=32)
+            title = sprites.label(layout['name'], 38, sprites.BLUE_BRIGHT)
+            screen.blit(title, title.get_rect(center=(panel.centerx, panel.y + 48)))
+            rows = scores.top(layout['name'], 8)
             if not rows:
-                empty = sprites.lettering('nobody yet', 22, sprites.tint(sprites.BLUE, .5))
-                screen.blit(empty, empty.get_rect(midleft=(panel.x + 20, panel.y + 56)))
+                empty = sprites.sign('nobody yet', 26, sprites.BLUE_BRIGHT)
+                screen.blit(empty, empty.get_rect(center=(panel.centerx, panel.y + 130)))
             for place, (name, seconds) in enumerate(rows):
-                words = sprites.lettering(f'{place + 1}.  {name}   {seconds:.2f} s', 24 if place == 0 else 20, sprites.BLUE if place == 0 else sprites.tint(sprites.BLUE, .35))
-                screen.blit(words, words.get_rect(midleft=(panel.x + 20 + place * 300, panel.y + 56)))
+                y = panel.y + 104 + place * 38
+                for words, x, anchor in ((f'{place + 1}', panel.x + 36, 'center'), (name, panel.x + 70, 'midleft'), (f'{seconds:.2f} s', panel.right - 24, 'midright')):
+                    image = sprites.lettering(words, 26, sprites.BLUE)
+                    screen.blit(image, image.get_rect(**{anchor: (x, y)}))
         image = sprites.sign('One-player Treasure Dash times, wiped at midnight.  Press any key to go back.', 22, sprites.BLUE_BRIGHT)
         screen.blit(image, image.get_rect(center=(width // 2, 706)))
 
@@ -421,10 +455,10 @@ def main():
                          'A path that never reaches the chest loses on the spot')),
             ('2  RACE', ('Your beaver only walks while your laser traces the line just ahead of it' if not args.simulate
                          else 'Your beaver only walks while the mouse traces the line just ahead of it',
-                         'Rocks, trees and logs on your line stop you for good; a deer only until it bounds off',
+                         'Rocks, trees and sticks on your line stop you for good; a deer only until it bounds off',
                          'Ponds are allowed: you swim a bit slower, so a short swim can beat a long detour',
                          ('Click' if args.simulate else 'Either button') + f": a {rules['boost_seconds']:g} s speed boost, ready again after {rules['boost_cooldown']:g} s",
-                         'Matching portals join up: draw to one and carry on from the other. Tokens give a burst of speed',
+                         'Matching portals join up: draw to one and carry on from the other. Berries give a burst of speed',
                          'First beaver to the chest wins' if not (treasure.solo) else "Reach the chest as fast as you can: today's best times are kept per board")),
         )
         y = 170
@@ -506,7 +540,32 @@ def main():
                         chosen = ('solo', 'treasure')[count_pick]
                         ids = [1] if chosen == 'solo' else [1, 2]
                         naming, typed = 0, ''
-                        mode, menu_message = ('names', '') if ask_names else start_chosen()
+                        mode, menu_message = ('maps', '') if chosen == 'solo' else ('names', '') if ask_names else start_chosen()
+                    if event.type != pygame.QUIT:
+                        continue
+                if mode == 'maps':
+                    # One player chooses among three maps; each keeps its own leaderboard.
+                    decided = False
+                    if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+                        for index, rect in enumerate(map_rects):
+                            if rect.collidepoint(event.pos):
+                                map_pick = index
+                                decided = event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            mode = 'players'
+                            continue
+                        if event.key in (pygame.K_LEFT, pygame.K_UP):
+                            map_pick = (map_pick - 1) % len(SOLO_BOARDS)
+                        if event.key in (pygame.K_RIGHT, pygame.K_DOWN, pygame.K_TAB):
+                            map_pick = (map_pick + 1) % len(SOLO_BOARDS)
+                        if event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_KP1, pygame.K_KP2, pygame.K_KP3):
+                            map_pick, decided = {pygame.K_1: 0, pygame.K_KP1: 0, pygame.K_2: 1, pygame.K_KP2: 1}.get(event.key, 2), True
+                        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            decided = True
+                    if decided:
+                        solo_board, chosen, ids, naming, typed = map_pick, 'solo', [1], 0, ''
+                        mode, menu_message = ('names', '') if ask_names and not names.get(1) else start_chosen()
                     if event.type != pygame.QUIT:
                         continue
                 if mode == 'home':
@@ -547,8 +606,8 @@ def main():
                     if again_button.collidepoint(event.pos):
                         again = True
                     elif mode == 'treasure' and treasure.solo and next_button.collidepoint(event.pos):
-                        solo_board = (treasure.board_index + 1) % len(BOARDS + SOLO_BOARDS)
-                        again = True
+                        mode, map_pick = 'maps', treasure.board_index
+                        continue
                     elif menu_button.collidepoint(event.pos):
                         mode, selection = ('home' if mode == 'treasure' else 'lobby'), 0
                         continue
@@ -556,7 +615,7 @@ def main():
                     again = True
                     continue
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_n and mode == 'treasure' and treasure.solo and treasure.phase == 'match_over':
-                    solo_board, again = (treasure.board_index + 1) % len(BOARDS + SOLO_BOARDS), True
+                    mode, map_pick = 'maps', treasure.board_index
                     continue
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and (playing or mode == 'pause'):
                     if pause_button.collidepoint(event.pos):
@@ -673,7 +732,13 @@ def main():
                     chosen = ('solo', 'treasure')[count_pick]
                     ids = [1] if chosen == 'solo' else [1, 2]
                     naming, typed = 0, ''
-                    mode, menu_message = ('names', '') if ask_names else start_chosen()
+                    mode, menu_message = ('maps', '') if chosen == 'solo' else ('names', '') if ask_names else start_chosen()
+            elif mode == 'maps' and (cycle or (confirm and not key_confirm)):
+                if cycle:
+                    map_pick = (map_pick + 1) % len(SOLO_BOARDS)
+                else:
+                    solo_board, chosen, ids, naming, typed = map_pick, 'solo', [1], 0, ''
+                    mode, menu_message = ('names', '') if ask_names and not names.get(1) else start_chosen()
             if mode in ('lobby', 'pause'):
                 choices = menu_choices(mode)
                 if cycle:
@@ -815,6 +880,8 @@ def main():
                 draw_scores()
             elif mode == 'players':
                 draw_players()
+            elif mode == 'maps':
+                draw_maps()
             elif mode in ('game', 'countdown', 'treasure'):
                 active_game().draw(screen)
                 if mode in ('game', 'treasure') and active_game().phase == 'match_over':
@@ -825,7 +892,7 @@ def main():
                     menu_button.center = (width // 2 + (300 if solo_over else 210), height - 96)
                     hints = [('RETRY' if solo_over else 'PLAY AGAIN', 'Enter' if args.simulate else 'button 1', again_button)]
                     if solo_over:
-                        hints.append(('NEXT BOARD', 'N', next_button))
+                        hints.append(('CHANGE MAP', 'N', next_button))
                     hints.append(('MENU', 'Space' if args.simulate else 'button 2', menu_button))
                     for words, how, button in hints:
                         hover = button.collidepoint(pygame.mouse.get_pos())

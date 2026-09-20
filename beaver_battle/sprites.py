@@ -706,10 +706,20 @@ def timber(length, width, zoom=1, seed=0):
     return pygame.transform.smoothscale(surface, (max(1, size[0] // SS), max(1, size[1] // SS)))
 
 
-def boost_token(size, zoom=1):
-    """A gold coin with a lightning bolt: run over it for a burst of speed."""
-    pen = Pen(40, 40, size * zoom / 14, zoom)
-    pen.ellipse(GOLD, (0, 0), 15, width=1.3)
-    pen.ellipse(tint(GOLD, .55), (0, 0), 11, outline=None)
-    pen.poly(BLUE_BRIGHT, [(2.5, -10), (-6, 1.5), (-1, 1.5), (-3.5, 10), (6.5, -2.5), (1.2, -2.5)], None)
+BERRY = (132, 112, 214)
+BERRY_DARK = (96, 84, 176)
+
+
+def berries(size, zoom=1):
+    """A sprig of blueberries: eat them for a burst of speed. (Blue, not red: the camera takes red for a laser.)"""
+    pen = Pen(44, 44, size * zoom / 14, zoom)
+    pen.stroke([(-2, -15), (0, -8), (4, -14)], LEAF_DARK, 1.6, closed=False)
+    pen.ellipse(LEAF, (8, -13), 7, 3.6, -.5, LEAF_DARK, 1.2)
+    pen.ellipse(LEAF, (-8, -13), 6, 3.2, .6, LEAF_DARK, 1.2)
+    for x, y, r in ((-7, 2, 8), (7, 1, 8.5), (0, 10, 8)):
+        pen.ellipse(BERRY, (x, y), r, outline=BERRY_DARK, width=1.4)
+        pen.ellipse(tint(BERRY, .55), (x - r * .35, y - r * .35), r * .3, outline=None)
+        for spoke in range(5):
+            angle = spoke * math.tau / 5 + .3
+            pen.line(BERRY_DARK, (x + r * .15 + 1.8 * math.cos(angle), y + r * .2 + 1.8 * math.sin(angle)), (x + r * .15, y + r * .2), .8)
     return pen.image()
