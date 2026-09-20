@@ -286,8 +286,26 @@ def bench_autostart(run, state):
         run.done = True
 
 
+def quit_to_menu(run, state):
+    if run.stage == 0 and state['mode'] == 'lobby':
+        run.stage = 1
+        return [key(pygame.K_RETURN)]
+    if run.stage == 1 and state['mode'] == 'ready':
+        run.stage = 2
+        return [key(pygame.K_RETURN)]
+    if run.stage == 2 and state['mode'] == 'game':
+        run.stage = 3
+        run.checkpoint = run.game.update.call_count
+        return [key(pygame.K_q)]
+    if run.stage == 3:
+        assert state['mode'] == 'home'
+        assert run.game.update.call_count == run.checkpoint
+        run.done = True
+
+
 def main():
     pygame_mouse_at = (0, 0)  # Where the dummy video driver reports the mouse.
+    Scenario(quit_to_menu).run()
     result = Scenario(lifecycle).run()
     assert [mode for mode, elapsed in result.history] == [
         'ready', 'survey_match', 'countdown', 'game', 'pause', 'lobby',

@@ -113,6 +113,9 @@ def main():
     relay = Relay(args.host, args.udp)
     reported = time.monotonic()
     with serial.Serial(args.port, args.baud, timeout=0.005, write_timeout=0.1, **({'exclusive': True} if sys.platform != 'win32' else {})) as link:
+        # CP2102 auto-reset wiring can hold the receiver in reset/download mode.
+        link.dtr = False
+        link.rts = False
         print(f'relaying {args.port} -> {args.host}:{args.udp}; controllers appear as they speak',
               flush=True)
         pending = bytearray()

@@ -110,6 +110,13 @@ static void output_init(void)
 #endif
         };
         ESP_ERROR_CHECK(ledc_channel_config(&servo_channel));
+#ifdef CONFIG_BB_SERVO_MIRROR_PINS
+        const int servo_pins[] = {15, 5, 18, 19, 21};
+        for (unsigned index = 0; index < sizeof(servo_pins) / sizeof(servo_pins[0]); index++) {
+            ESP_ERROR_CHECK(ledc_set_pin(servo_pins[index], LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1));
+        }
+        ESP_LOGI(log_tag, "Servo PWM mirrored to GPIO15/5/18/19/21; GPIO33 remains active");
+#endif
     }
     gpio_config_t buttons = {
         .pin_bit_mask = (UINT64_C(1) << FIRE_GPIO) | (UINT64_C(1) << SPECIAL_GPIO),

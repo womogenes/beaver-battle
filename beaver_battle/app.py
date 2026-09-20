@@ -631,6 +631,11 @@ def main():
                     elif event.unicode and event.unicode.isprintable() and len(typed) < 10:
                         typed = (typed + event.unicode.upper()).lstrip()
                     continue
+                if (event.type == pygame.KEYDOWN and event.key == pygame.K_q and
+                        mode in ('game', 'treasure', 'dam', 'pause', 'countdown', 'ready')):
+                    mode, selection, accumulator = 'home', 0, 0.0
+                    ready, again, menu_message, status = set(), False, '', ''
+                    continue
                 if mode == 'scores':
                     if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
                         mode = 'players'
