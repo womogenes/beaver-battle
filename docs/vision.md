@@ -285,3 +285,10 @@ five filled shapes and 55.7% solid coverage; replay after this fix retained the 
 physical closed drawings at 6.2%. A fresh 14-second camera match showed no giant
 edge islands and completed 832 frames without a crash. Drawings connected directly
 to the projection boundary retain their strokes but are not inferred as solid fills.
+
+Live drawing modes also reject detections within eight logical pixels of known
+high-contrast projected artwork edges. This suppresses residual text under small
+warp errors; a shifted-title regression retains real strokes away from those edges.
+The margin is configurable with `camera.projection_edge_margin`. Physical ink
+hidden directly beneath projected outlines cannot be inferred reliably there.
+Blank match surveys do not apply this exclusion.

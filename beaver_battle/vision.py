@@ -367,6 +367,20 @@ def under_white(warped, gain, canvas):
     return np.clip(restored, 0, 255).astype(np.uint8)
 
 
+def projection_edges(canvas, margin=8):
+    """Pixels where projected outlines/text make a camera ink reading ambiguous.
+
+    Gain compensation cannot remove a shifted glyph exactly. Exclude a small
+    neighborhood of known artwork edges instead of promoting its residual into
+    marker ink. Flat areas remain readable, even on a colored game background.
+    """
+    gradient = cv2.morphologyEx(canvas, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+    edges = (gradient.max(axis=2) >= 16).astype(np.uint8)
+    radius = max(1, int(margin))
+    return cv2.dilate(edges, cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))) > 0
+
+
 def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
               min_area=OBSTACLE_MIN_AREA, blur=3.0):
     """Find hands, shadows and placed objects: the board is darker than the projection predicts.
@@ -1006,6 +1020,11 @@ class Vision:
         dark = ink_mask(surface, *self.ink_settings())
         if predicted:
             dark = dark | obstacles(warped, reference, gain, canvas, *self.obstacle_settings())
+        if not survey and canvas is not None:
+            # The projector/camera warp and photometric model are approximate.
+            # Never turn residual text or sprite outlines into physical routes.
+            margin = self.config.get("camera", {}).get("projection_edge_margin", 8)
+            dark &= ~projection_edges(canvas, margin)
         with self.lock:
             if (generation != self.calibration_generation or self.calibration_requested.is_set()
                     or matrix is not self.matrix):

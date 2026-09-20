@@ -243,6 +243,28 @@ def check_obstacles():
         "A screen with no visible markers cannot measure the projector"
 
 
+def check_projected_text_shift():
+    width, height = 640, 360
+    canvas = np.full((height, width, 3), 255, np.uint8)
+    cv2.putText(canvas, "BEAVER DASH", (40, 90), cv2.FONT_HERSHEY_SIMPLEX,
+                1.3, (20, 20, 20), 3)
+    shifted = cv2.warpAffine(canvas, np.float32([[1, 0, 5], [0, 1, 3]]),
+                             (width, height), borderValue=(255, 255, 255))
+    reference = np.full(canvas.shape, 200, np.float32)
+    gain = np.float32([100, 100, 100])
+    camera = np.clip(expected_board(reference, gain, shifted), 0, 255).astype(np.uint8)
+    cv2.line(camera, (80, 210), (550, 250), (20, 20, 20), 5)
+    vision = Vision({"display": {"width": width, "height": height},
+                     "camera": {"wall_persistence": 1}})
+    vision.matrix = np.eye(3)
+    vision.wall_filter = WallFilter(1)
+    for model_gain in (gain, None):
+        vision.process_walls(camera, 1.0, vision.matrix, reference, model_gain,
+                             canvas, vision.calibration_generation)
+        assert not vision.walls[:150].any(), "Shifted projected text must not become marker ink"
+        assert vision.walls[200:260].sum() > 2000, "Physical marker on clear field must survive"
+
+
 def check_projection_handover():
     vision = Vision({"display": {"width": 64, "height": 48},
                      "camera": {"calibration_file": "/tmp/no-calibration.npz", "projection_delay": 0.5}})
@@ -778,6 +800,7 @@ check_ink_colours()
 check_scan()
 check_obstacles()
 check_projection_handover()
+check_projected_text_shift()
 check_marker_memory()
 check_backend()
 check_candidates()
