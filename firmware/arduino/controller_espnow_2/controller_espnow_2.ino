@@ -11,11 +11,13 @@
 // inherited from an access point that does not exist.
 
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
 
 const int CONTROLLER_ID = 2;         // 1 or 2, unique per controller
-const int LASER_GPIO = 25;
+const int LASER_GPIO = 25;         // default; 'p<n>' over serial moves it on the bench
+int laserPin = LASER_GPIO;
 const int FIRE_GPIO = 14;            // button one
 const int SPECIAL_GPIO = 27;         // button two
 const uint32_t DEBOUNCE_MS = 15;
@@ -33,6 +35,47 @@ bool identityLevel(int id, uint32_t gapMs, uint32_t elapsedMs) {
     return true;
   }
   return (elapsedMs % period) >= gapMs;
+}
+
+// GPIO25 is DAC1. A pad left routed to the DAC, or to any other peripheral, keeps driving
+// an analog level through digitalWrite, which shows up as a laser that lights but is dim
+// and small rather than one that fails outright -- measured on controller 2 as a dot of
+// median area 1 px2 and redness 18, against controller 1's 98 and 31 on the same rig. An
+// ordinary reflash does not clear it because nothing in the sketch ever touched the pad
+// configuration. Reset it to plain GPIO and ask for the strongest drive the pad offers, so
+// the MOSFET gate sees a full swing.
+void setupLaserPin() {
+  gpio_reset_pin((gpio_num_t)laserPin);
+#if SOC_DAC_SUPPORTED
+  dacDisable(laserPin);
+#endif
+  pinMode(laserPin, OUTPUT);
+  gpio_set_drive_capability((gpio_num_t)laserPin, GPIO_DRIVE_CAP_3);
+  digitalWrite(laserPin, LOW);     // dark at power-up and whenever FIRE is released
+}
+
+// Move the laser to another pad without reflashing, so a pad that cannot drive the gate
+// can be told from a laser that is simply weak. Bench only, like the other serial commands.
+void switchLaserPin(int pin) {
+  // GPIO12 (MTDI) selects flash voltage at reset, and a board left with it pulled high does
+  // not boot at all -- "invalid header: 0xffffffff", recoverable only by holding BOOT. 0, 2
+  // and 15 are the other straps, and 6-11 are wired to the SPI flash. None may be driven.
+  const int forbidden[] = {0, 2, 6, 7, 8, 9, 10, 11, 12, 15};
+  for (size_t i = 0; i < sizeof(forbidden) / sizeof(forbidden[0]); i++) {
+    if (pin == forbidden[i]) {
+      Serial.printf("laser pin %d refused: strapping or flash pin\n", pin);
+      return;
+    }
+  }
+  if (pin < 0 || pin > 33) {
+    Serial.printf("laser pin %d out of range\n", pin);
+    return;
+  }
+  digitalWrite(laserPin, LOW);
+  gpio_reset_pin((gpio_num_t)laserPin);
+  laserPin = pin;
+  setupLaserPin();
+  Serial.printf("laser now on GPIO%d\n", laserPin);
 }
 
 struct Button {
@@ -53,6 +96,12 @@ struct Button {
 };
 
 Button fire, special;
+// Bench diagnostics over USB serial. In the game the controller runs from a power bank with
+// nothing on its USB port, so these only ever fire on the bench. They make the laser
+// testable without a hand holding a button for the length of a measurement.
+//   l  force the laser solid   o  force it off   b  back to the FIRE button
+//   p<n>  move the laser to GPIO<n>          ?  report current state
+int laserOverride = -1;              // -1 follows FIRE, 0 forced off, 1 forced solid
 uint32_t boot = 0, seq = 0, pressedAt = 0, lastSendMs = 0, reportedMs = 0;
 uint32_t sent = 0, failedToQueue = 0, delivered = 0, notDelivered = 0;
 bool lit = false;
@@ -70,8 +119,8 @@ void onSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LASER_GPIO, OUTPUT);
-  digitalWrite(LASER_GPIO, LOW);       // dark at power-up and whenever FIRE is released
+  Serial.setTimeout(100);   // 'p<n>' parses a number; do not stall the loop waiting
+  setupLaserPin();
   pinMode(FIRE_GPIO, INPUT_PULLUP);
   pinMode(SPECIAL_GPIO, INPUT_PULLUP);
   boot = esp_random();
@@ -126,9 +175,22 @@ void loop() {
     changed = true;
     Serial.printf("button two %s\n", special.pressed ? "PRESSED" : "released");
   }
-  bool wanted = fire.pressed && identityLevel(CONTROLLER_ID, identityGapMs(CONTROLLER_ID), now - pressedAt);
+  while (Serial.available()) {
+    int command = Serial.read();
+    if (command == 'l') { laserOverride = 1; Serial.println("laser forced SOLID"); }
+    else if (command == 'o') { laserOverride = 0; Serial.println("laser forced OFF"); }
+    else if (command == 'b') { laserOverride = -1; Serial.println("laser follows FIRE"); }
+    else if (command == 'p') { switchLaserPin((int)Serial.parseInt()); }
+    else if (command == '?') {
+      Serial.printf("controller %d, laser GPIO%d, override %d, lit %d\n",
+                    CONTROLLER_ID, laserPin, laserOverride, (int)lit);
+    }
+  }
+  bool wanted = laserOverride >= 0
+      ? laserOverride == 1
+      : (fire.pressed && identityLevel(CONTROLLER_ID, identityGapMs(CONTROLLER_ID), now - pressedAt));
   if (wanted != lit) {
-    digitalWrite(LASER_GPIO, wanted ? HIGH : LOW);
+    digitalWrite(laserPin, wanted ? HIGH : LOW);
     lit = wanted;
   }
   if (changed || now - lastSendMs >= HEARTBEAT_MS) {
