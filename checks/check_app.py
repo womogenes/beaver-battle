@@ -165,6 +165,19 @@ def laser_pointer(run, state):
         run.done = True
 
 
+def laser_select(run, state):
+    if run.frames == 2:
+        assert state['selection'] == 0, 'FIRE illuminates without cycling the menu'
+    run.buttons[1] = (True, False)
+    run.buttons[2] = (True, run.frames >= 2)
+    if state['mode'] == 'info':
+        run.done = True
+        return []
+    pending = run.posted[run.checkpoint:]
+    run.checkpoint = len(run.posted)
+    return pending
+
+
 def calibration_cancel(run, state):
     if run.stage == 0:
         run.stage = 1
@@ -222,6 +235,15 @@ def main():
     pointed = Scenario(laser_pointer).run()
     hovers = [event.pos for event in pointed.posted if event.type == pygame.MOUSEMOTION]
     assert hovers and set(hovers) == {(640, 360)}, 'the lowest controller\'s dot hovers the menu'
+
+    selected = Scenario(laser_select).run()
+    clicks = [event for event in selected.posted if event.type == pygame.MOUSEBUTTONDOWN]
+    assert len(clicks) == 1 and clicks[0].pos == (640, 360), 'Player 2 clicks its hovered item once per press'
+    assert any(mode == 'info' for mode, elapsed in selected.history), 'Hover plus button 2 opens How to play'
+    with patch.object(pygame.draw, 'circle', wraps=pygame.draw.circle) as circles:
+        Scenario(laser_pointer).run()
+    rings = [call.args[1] for call in circles.call_args_list if len(call.args) >= 4 and call.args[3] == 19]
+    assert (35, 90, 220) in rings and (20, 155, 115) in rings, 'Both player rings are drawn'
 
     bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '2'], active=[])
     bench.run()

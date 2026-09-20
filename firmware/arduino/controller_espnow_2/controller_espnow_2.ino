@@ -106,6 +106,8 @@ Button fire, special;
 //   l  force the laser solid   o  force it off   b  back to the FIRE button
 //   p<n>  move the laser to GPIO<n>          ?  report current state
 int laserOverride = -1;              // -1 follows FIRE, 0 forced off, 1 forced solid
+uint32_t overrideSetMs = 0;          // when it was set, so it cannot outlive the bench
+const uint32_t OVERRIDE_TIMEOUT_MS = 120000;
 uint32_t boot = 0, seq = 0, pressedAt = 0, lastSendMs = 0, reportedMs = 0;
 uint32_t sent = 0, failedToQueue = 0, delivered = 0, notDelivered = 0;
 bool lit = false;
@@ -181,14 +183,22 @@ void loop() {
   }
   while (Serial.available()) {
     int command = Serial.read();
-    if (command == 'l') { laserOverride = 1; Serial.println("laser forced SOLID"); }
-    else if (command == 'o') { laserOverride = 0; Serial.println("laser forced OFF"); }
+    if (command == 'l') { laserOverride = 1; overrideSetMs = now; Serial.println("laser forced SOLID"); }
+    else if (command == 'o') { laserOverride = 0; overrideSetMs = now; Serial.println("laser forced OFF"); }
     else if (command == 'b') { laserOverride = -1; Serial.println("laser follows FIRE"); }
     else if (command == 'p') { switchLaserPin((int)Serial.parseInt()); }
     else if (command == '?') {
       Serial.printf("controller %d, laser GPIO%d, override %d, lit %d\n",
                     CONTROLLER_ID, laserPin, laserOverride, (int)lit);
     }
+  }
+  // The button always wins. A bench override used to sit there until someone sent 'b' or
+  // cut the power, so forgetting to release one left a player holding a controller whose
+  // FIRE did nothing, with no symptom on the board and nothing to see in the game. A single
+  // stray byte on the USB line could do the same. Pressing FIRE now takes control straight
+  // back, and an override that nobody clears expires on its own.
+  if (laserOverride >= 0 && (fire.pressed || now - overrideSetMs >= OVERRIDE_TIMEOUT_MS)) {
+    laserOverride = -1;
   }
   bool wanted = laserOverride >= 0
       ? laserOverride == 1

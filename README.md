@@ -101,3 +101,24 @@ Validated on September 19, 2026: game/vision/network/menu checks, a 180-second i
 `app.py` owns menus and the fixed-step loop; `game.py` owns combat; `vision.py` publishes immutable latest-frame observations; `network.py` handles UDP and laser identification. [PROTOCOL.md](PROTOCOL.md) is the shared firmware contract. Another game can consume `PlayerInput` and wall masks and emit `FeedbackEvent` without replacing camera or controller code. See [vision notes](docs/vision.md), [game notes](docs/game.md), and [physical game ideas](docs/physical-ideas.md).
 
 [PLAN.md](PLAN.md) is the original brief; [DECISIONS.md](DECISIONS.md) records subsequent decisions. Read [AGENTS.md](AGENTS.md) before contributing. Work on a topic branch, respect subsystem ownership, run relevant checks, fetch before pushing, and never force-push shared work. Controller power, cooling, and the physical water mechanism are deferred to the team's bench assembly. Servo output stays disabled until its travel is calibrated.
+
+### Current ESP-NOW setup
+
+Plug the third ESP32 (receiver firmware) into USB and leave both controllers powered.
+Run `python -m beaver_battle.relay --port /dev/ttyUSB0` with pyserial installed, then
+run the game on the selected HDMI display. Check the actual receiver port first;
+identical CP2102 boards can share the same USB serial identifier.
+The receiver uses 460800 baud. Controllers connect automatically on radio channel 1.
+The default `camera.identity_mode = "telemetry"` uses their reported laser states
+instead of waiting for unsupported command acknowledgements. Hold FIRE and keep the
+two dots apart during acquisition. If only one dot is detectable while both gates are
+on, the software cannot safely infer both identities. For the older bidirectional
+Wi-Fi firmware, select `identity_mode = "acknowledged"`.
+
+Laser pointers are shown as numbered rings: player 1 blue, player 2 green. Hold
+button 1 to illuminate the laser, aim at a menu button, then press button 2 to
+select it. Either controller can click at its own tracked position; the lowest
+connected controller supplies the primary hover highlight. Holding button 1 no
+longer cycles menu choices. Missing tracking does not click a previously selected
+item. Keyboard and mouse navigation remain available, and laser navigation works
+in the pause menu too.

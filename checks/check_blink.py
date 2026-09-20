@@ -6,6 +6,7 @@ are compiled here from controller.c and compared against the sketch's own arithm
 a change to one that is not made to the other fails rather than reaching a board.
 """
 
+import pathlib
 import re
 import subprocess
 import tempfile
@@ -126,9 +127,48 @@ def check_one_sketch_per_controller():
         "the two sketches differ by more than their controller number"
 
 
+def check_the_button_reclaims_the_laser():
+    """A bench override must never leave a player's FIRE button doing nothing.
+
+    It used to sit there until someone sent 'b' or cut the power, so forgetting to release
+    one disabled the controller with no symptom anywhere: the board looked healthy, the
+    radio kept reporting, and only the laser stayed dark. One stray byte on the USB line
+    did the same thing. Both controllers were left like this in a single session.
+    """
+    import re
+    TIMEOUT_MS = 120000
+
+    def resolve(override, set_ms, now_ms, fire_pressed):
+        """Mirror of the sketch's release rule."""
+        if override >= 0 and (fire_pressed or now_ms - set_ms >= TIMEOUT_MS):
+            return -1
+        return override
+
+    # Pressing FIRE takes control back immediately, whichever way the override was set.
+    assert resolve(0, 0, 500, True) == -1, 'FIRE must clear a forced-off override'
+    assert resolve(1, 0, 500, True) == -1, 'FIRE must clear a forced-solid override'
+    # An override nobody clears expires on its own.
+    assert resolve(0, 0, TIMEOUT_MS, False) == -1, 'a forced-off override must expire'
+    assert resolve(0, 0, TIMEOUT_MS - 1, False) == 0, 'it must not expire early'
+    # It still has to survive long enough to take a bench measurement.
+    assert resolve(1, 0, 60000, False) == 1, 'forced solid must last a measurement'
+
+    # And the sketches must actually contain the rule.
+    for controller in (1, 2):
+        source = (pathlib.Path(__file__).resolve().parent.parent / 'firmware' / 'arduino'
+                  / f'controller_espnow_{controller}' / f'controller_espnow_{controller}.ino').read_text()
+        assert re.search(r'laserOverride >= 0 && \(fire\.pressed \|\| now - overrideSetMs', source), \
+            f'controller {controller} must let FIRE reclaim the laser'
+        found = re.search(r'OVERRIDE_TIMEOUT_MS = (\d+)', source)
+        assert found and int(found.group(1)) == TIMEOUT_MS, \
+            f'controller {controller} timeout must be {TIMEOUT_MS} ms'
+
+
 check_parity()
+check_the_button_reclaims_the_laser()
 check_controller_one_never_blinks()
 check_the_laser_starts_dark()
 check_one_sketch_per_controller()
-print("Blink checks passed: both sketches agree with the firmware on period, gap, blink "
+print("Blink checks passed: the button reclaims the laser from any bench override, and "
+      "both sketches agree with the firmware on period, gap, blink "
       "and button settle; each starts dark and needs FIRE held")
