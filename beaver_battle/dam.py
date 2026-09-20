@@ -541,6 +541,37 @@ class DamIt:
         self.draw_hud(frame)
         surface.blit(frame, (0, 0))
 
+    def name_plate(self, player_id, size, lit=True):
+        """A player's name on a pill of their own colour (pale when it is not their go)."""
+        unit = self.scale
+        word = sprites.lettering(self.name(player_id), max(12, round(size)), sprites.INK if lit else sprites.tint(sprites.INK, .45))
+        plate = pygame.Surface((word.get_width() + round(size * 1.1), round(size * 1.45)), pygame.SRCALPHA)
+        color = sprites.PLAYER_COLORS[(player_id - 1) % len(sprites.PLAYER_COLORS)]
+        pygame.draw.rect(plate, sprites.INK if lit else sprites.tint(sprites.INK, .45), plate.get_rect(), border_radius=plate.get_height() // 2)
+        pygame.draw.rect(plate, color if lit else sprites.tint(color, .6), plate.get_rect().inflate(-round(6 * unit), -round(6 * unit)), border_radius=plate.get_height() // 2)
+        plate.blit(word, word.get_rect(center=plate.get_rect().center))
+        return plate
+
+    def draw_roles(self, frame, turn):
+        """Both players and their jobs, one in each bottom corner, with whoever's go it is lit up and the other pale;
+        and for the first moments of a go, the name across the board so nobody has to ask."""
+        unit = self.scale
+        for player_id, job, corner in ((self.builder, "BUILDER", 0), (self.attacker, "ATTACKER", 1)):
+            lit = player_id == turn
+            plate = self.name_plate(player_id, (30 if lit else 22) * unit, lit)
+            words = sprites.sign(f"{job}: YOUR GO" if lit else job, max(10, round((20 if lit else 16) * unit)), sprites.BLUE if lit else sprites.BLUE_BRIGHT)
+            x = 18 * unit if corner == 0 else self.width - 18 * unit
+            anchor = "bottomleft" if corner == 0 else "bottomright"
+            # Clear of the hint along the bottom edge.
+            frame.blit(plate, plate.get_rect(**{anchor: (x, self.height - 44 * unit)}))
+            frame.blit(words, words.get_rect(**{anchor: (x, self.height - 48 * unit - plate.get_height())}))
+        whole = self.setting("build_seconds", 30) if self.phase == "building" else self.attack_seconds() if self.phase == "attack" else None
+        if turn is not None and whole is not None and whole - self.timer < 2.0:
+            color = sprites.PLAYER_COLORS[(turn - 1) % len(sprites.PLAYER_COLORS)]
+            call = sprites.label(f"{self.name(turn)} {'BUILDS' if self.phase == 'building' else 'CHEWS'}!", max(24, round(92 * unit)), color, tilt=-3)
+            call = sprites.fit_width(call, self.width * .8)
+            frame.blit(call, call.get_rect(center=(self.width / 2, self.height * .3)))
+
     def draw_hud(self, frame):
         unit = self.scale
         bar = pygame.Rect(0, 0, self.width, round(58 * unit))
@@ -550,18 +581,28 @@ class DamIt:
         frame.blit(title, title.get_rect(midleft=(16 * unit, bar.centery - 9 * unit)))
         place = sprites.sign(MAPS[self.board_index]["name"], max(10, round(15 * unit)))
         frame.blit(place, place.get_rect(midleft=(16 * unit, bar.centery + 15 * unit)))
+        # Whose go it is, in that player's own colour, before anything else on the line.
+        turn = self.builder if self.phase == "building" else self.attacker if self.phase in ("rising", "attack") else None
         if self.phase == "building":
-            message = f"{self.name(self.builder)}: BUILD A DAM TO KEEP THE LODGE DRY"
+            message = "BUILD A DAM TO KEEP THE LODGE DRY"
         elif self.phase == "rising":
             message = "THE RIVER RISES..." if not self.strength else f"THE RIVER RISES...   DAM AT {1 - self.lost:.0%} STRENGTH"
         elif self.phase == "attack":
-            message = f"{self.name(self.attacker)}: CHEW THROUGH BEFORE THE TIME RUNS OUT!"
+            message = "CHEW THROUGH BEFORE THE TIME RUNS OUT!"
         else:
             message = ""
         if message:
             left_edge, right_edge = max(title.get_width(), place.get_width()) + 40 * unit, self.width - 128 * unit
-            line = sprites.fitted(sprites.sign(message, max(16, round(30 * unit))), right_edge - left_edge)
-            frame.blit(line, line.get_rect(center=((left_edge + right_edge) / 2, bar.centery)))
+            tag = self.name_plate(turn, 30 * unit) if turn is not None else None
+            room = right_edge - left_edge - (tag.get_width() + 16 * unit if tag else 0)
+            line = sprites.fit_width(sprites.sign(message, max(16, round(30 * unit))), room)
+            start = (left_edge + right_edge - line.get_width() - (tag.get_width() + 16 * unit if tag else 0)) / 2
+            if tag:
+                frame.blit(tag, tag.get_rect(midleft=(start, bar.centery)))
+                start += tag.get_width() + 16 * unit
+            frame.blit(line, line.get_rect(midleft=(start, bar.centery)))
+        if self.phase != "match_over":
+            self.draw_roles(frame, turn)
         if self.phase in ("building", "attack"):
             whole = self.setting("build_seconds", 30) if self.phase == "building" else self.attack_seconds()
             sprites.time_bar(frame, (self.width * .2, bar.bottom + 12 * unit, self.width * .6, 18 * unit), self.timer / whole, self.clock)
@@ -578,7 +619,7 @@ class DamIt:
                 pygame.draw.rect(frame, sprites.INK, meter.inflate(8 * unit, 8 * unit), border_radius=round(14 * unit))
                 pygame.draw.rect(frame, sprites.WHITE, meter, border_radius=round(10 * unit))
                 pygame.draw.rect(frame, sprites.BARK, (meter.x, meter.y, meter.width * min(1, used), meter.height), border_radius=round(10 * unit))
-                words = sprites.fitted(sprites.sign(f"WOOD USED     {grade}", max(14, round(24 * unit))), self.width * .9)
+                words = sprites.fit_width(sprites.sign(f"WOOD USED     {grade}", max(14, round(24 * unit))), self.width * .9)
                 frame.blit(words, words.get_rect(midbottom=(self.width / 2, meter.top - 8 * unit)))
             else:
                 line = sprites.sign("DRAW YOUR DAM FROM BANK TO BANK", max(14, round(28 * unit)))

@@ -931,11 +931,11 @@ class Treasure:
             best = f"BEST TODAY  {self.standings[0][1]:.2f}  {self.standings[0][0]}" if self.standings else "NO TIME YET TODAY"
             words = sprites.sign(f"{self.race_time:5.1f} s" if self.phase == "running" else best, max(14, round((34 if self.phase == "running" else 22) * unit)),
                                  sprites.BLUE if self.phase == "running" else sprites.BLUE_BRIGHT)
-            words = sprites.fitted(words, 300 * unit)
+            words = sprites.fit_width(words, 300 * unit)
             frame.blit(words, words.get_rect(midright=(right_edge, bar.centery)))
             right_edge -= words.get_width() + 24 * unit
         if message:
-            line = sprites.fitted(sprites.sign(message, max(16, round(32 * unit))), right_edge - left_edge)
+            line = sprites.fit_width(sprites.sign(message, max(16, round(32 * unit))), right_edge - left_edge)
             frame.blit(line, line.get_rect(center=((left_edge + right_edge) / 2, bar.centery)))
         if self.phase == "drawing":
             sprites.time_bar(frame, (self.width * .2, bar.bottom + 12 * unit, self.width * .6, 18 * unit), self.timer / self.setting("draw_seconds", 15), self.clock)
