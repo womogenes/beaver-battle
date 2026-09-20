@@ -71,8 +71,8 @@ def simulated_walls(width, height):
 
 def menu_choices(mode):
     if mode == 'lobby':
-        return ['Start 2-player match', 'Start 3-player match', 'Calibrate board', 'Quit']
-    return ['Resume', 'New match', 'Calibrate board', 'Quit']
+        return ['Start 2-player match', 'Start 3-player match', 'Calibrate board', 'How to play', 'Quit']
+    return ['Resume', 'New match', 'Calibrate board', 'How to play', 'Quit']
 
 
 def display_test(pygame, screen, display_index, seconds=0):
@@ -184,6 +184,14 @@ def main():
     # Names are typed on the laptop before a match; unattended runs skip the question.
     ask_names = not (args.headless or args.bench or args.seconds or args.no_names)
     names, naming, typed = {}, 0, ''
+    info_return = 'lobby'
+    pause_button = pygame.Rect(width - 58, 12, 40, 40)
+    info_button = pygame.Rect(width - 108, 12, 40, 40)
+    again_button = pygame.Rect(0, 0, 300, 66)
+    again_button.center = (width // 2 - 170, height - 96)
+    menu_button = pygame.Rect(0, 0, 220, 66)
+    menu_button.center = (width // 2 + 210, height - 96)
+    again = False
     if mode == 'game' and ask_names:
         mode = 'names'
     ids = list(range(1, config['game']['players'] + 1))
@@ -217,6 +225,45 @@ def main():
         else:
             surface = sprites.sign(text, 44 if selected else 36, color or sprites.BLUE)
         screen.blit(surface, ((width - surface.get_width()) // 2, y - (18 if large else 0)))
+
+    def draw_info():
+        """How to play, with the numbers read from the rules actually in force."""
+        rules = config['game']
+        screen.fill((224, 239, 241))
+        text_line('HOW TO PLAY', 30, True)
+        each = rules.get('reload_mode', 'each') == 'each'
+        steer = ['Move the mouse: your canoe steers toward it', 'Left click: throw a rock', 'Right click: use your power-up',
+                 'P or Esc: pause    R: new match    I: this page'] if args.simulate else [
+                 'Point your laser: your canoe steers toward the dot', 'Button 1: throw a rock', 'Button 2: use your power-up',
+                 'Hold both buttons for a second: pause']
+        play = [f"You carry {rules['magazine']} rocks; " + (f"each comes back after {rules.get('reload_each', 1):g} s" if each else f"then wait {rules['reload_seconds']:g} s to reload"),
+                'The first hit knocks you into the water']
+        if rules.get('canoe_return', 0) > 0:
+            play.append(f"Stay afloat {rules['canoe_return']:g} s and a new canoe arrives")
+        play.append('Another hit' + (', or a canoe running you over,' if rules.get('ram_swimmers', True) else '') + ' sinks you')
+        play.append((f"Sink a beaver: +1.  First to {rules['winning_score']} wins" if rules.get('scoring', 'kills') == 'kills'
+                     else f"Last canoe afloat wins the round.  First to {rules['winning_score']} wins"))
+        for column, (heading, lines) in enumerate((('CONTROLS', steer), ('RULES', play))):
+            x = width // 4 + column * width // 2
+            title = sprites.label(heading, 40, sprites.BLUE_BRIGHT)
+            screen.blit(title, title.get_rect(center=(x, 186)))
+            for index, line in enumerate(lines):
+                image = sprites.sign(line, 25)
+                screen.blit(image, image.get_rect(center=(x, 240 + index * 42)))
+        title = sprites.label('POWER-UPS', 40, sprites.BLUE_BRIGHT)
+        screen.blit(title, title.get_rect(center=(width // 2, 468)))
+        for index, (kind, words) in enumerate((('laser', 'Laser: a beam straight ahead'), ('jouster', 'Jouster: ram with the horn'), ('mine', 'Mine: drop it and lure them in'))):
+            x = width // 6 + index * width // 3
+            icon = sprites.pickup(26, kind)
+            screen.blit(icon, icon.get_rect(center=(x, 530)))
+            image = sprites.sign(words, 25)
+            screen.blit(image, image.get_rect(center=(x, 584)))
+        for index, line in enumerate(('Break a drifting boulder to release a power-up, then sail close and it flies to you.',
+                                      'Draw on the board with a marker: lines become sticks, closed shapes become logs and rocks.')):
+            image = sprites.sign(line, 23)
+            screen.blit(image, image.get_rect(center=(width // 2, 628 + index * 32)))
+        image = sprites.sign('Press any key or button to go back', 22, sprites.BLUE_BRIGHT)
+        screen.blit(image, image.get_rect(center=(width // 2, 700)))
 
     try:
         if not args.simulate:
@@ -253,6 +300,28 @@ def main():
                     elif event.unicode and event.unicode.isprintable() and len(typed) < 10:
                         typed = (typed + event.unicode.upper()).lstrip()
                     continue
+                if mode == 'info' and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                    mode = info_return
+                    continue
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and mode == 'game' and game.phase == 'match_over':
+                    if again_button.collidepoint(event.pos):
+                        again = True
+                    elif menu_button.collidepoint(event.pos):
+                        mode, selection = 'lobby', 0
+                if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and mode == 'game' and game.phase == 'match_over':
+                    again = True
+                    continue
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and mode in ('game', 'pause'):
+                    if pause_button.collidepoint(event.pos):
+                        mode, selection = ('pause', 0) if mode == 'game' else ('game', selection)
+                    elif info_button.collidepoint(event.pos):
+                        mode, info_return = 'info', 'pause'
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_p and mode in ('game', 'pause'):
+                    mode, selection = ('pause', 0) if mode == 'game' else ('game', selection)
+                    continue
+                if event.type == pygame.KEYDOWN and event.key in (pygame.K_i, pygame.K_F1) and mode in ('game', 'pause', 'lobby'):
+                    mode, info_return = 'info', 'lobby' if mode == 'lobby' else 'pause'
+                    continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         if mode == 'game':
@@ -279,6 +348,8 @@ def main():
             if args.simulate:
                 mouse = pygame.mouse.get_pos() if args.mouse else None
                 pressed = pygame.mouse.get_pressed(3)
+                if pause_button.union(info_button).collidepoint(pygame.mouse.get_pos()):
+                    pressed = (False, False, False)  # A click on a button is not a throw.
                 inputs = simulated_inputs(config, elapsed, mouse, (pressed[0], pressed[2]), ids)
                 active_ids = ids
             elif args.bench:
@@ -324,6 +395,8 @@ def main():
                         else:
                             mode = 'calibration'
                             vision.begin_calibration()
+                    elif choice == 'How to play':
+                        mode, info_return = 'info', mode
                     elif choice == 'Resume':
                         mode, status = 'game', ''
                     elif choice == 'New match':
@@ -377,8 +450,13 @@ def main():
                     if not args.simulate:
                         bridge.feedback(events, now)
                     accumulator -= 1 / 60
-                if game.phase == 'match_over' and confirm:
+                if game.phase == 'match_over' and (again or (cycle and not key_cycle)):
+                    # Play again: the same players and names, straight into a new match.
+                    game.new_match(ids, walls)
+                    mode, countdown_until, accumulator = ('game', 0.0, 0.0) if args.simulate else ('countdown', elapsed + 3.0, 0.0)
+                elif game.phase == 'match_over' and confirm:
                     mode, selection = 'lobby', 0
+                again = False
             else:
                 accumulator = 0
             if mode in ('survey', 'survey_match'):
@@ -404,8 +482,33 @@ def main():
                 # Name the corner that is blocked, on the board, where the operator is standing.
                 text_line(snapshot.error or 'Keep all four markers in view', height // 2 + 60)
                 text_line('Keep ink and hands out of the four corners. Hold both buttons to cancel.', height // 2 + 96)
+            elif mode == 'info':
+                if cycle or confirm:
+                    mode = info_return
+                draw_info()
             elif mode in ('game', 'countdown'):
                 game.draw(screen)
+                if mode == 'game' and game.phase == 'match_over':
+                    hints = (('PLAY AGAIN', 'Enter', again_button), ('MENU', 'Space', menu_button)) if args.simulate else (
+                        ('PLAY AGAIN', 'button 1', again_button), ('MENU', 'button 2', menu_button))
+                    for words, how, button in hints:
+                        hover = button.collidepoint(pygame.mouse.get_pos())
+                        pygame.draw.rect(screen, sprites.WHITE, button.inflate(10, 10), border_radius=36)
+                        pygame.draw.rect(screen, sprites.BLUE_BRIGHT if hover else sprites.BLUE, button, border_radius=32)
+                        face = sprites.lettering(words, 38, sprites.WHITE, 2)
+                        screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
+                        hint = sprites.sign(how, 22)
+                        screen.blit(hint, hint.get_rect(center=(button.centerx, button.bottom + 20)))
+                if mode == 'game':
+                    for button, icon in ((pause_button, 'pause'), (info_button, 'info')):
+                        pygame.draw.circle(screen, sprites.BLUE, button.center, 20)
+                        pygame.draw.circle(screen, sprites.WHITE, button.center, 16)
+                        if icon == 'pause':
+                            for x in (-6, 3):
+                                pygame.draw.rect(screen, sprites.BLUE, (button.centerx + x, button.centery - 8, 4, 16), border_radius=2)
+                        else:
+                            mark = sprites.lettering('i', 26, sprites.BLUE)
+                            screen.blit(mark, mark.get_rect(center=(button.centerx, button.centery - 1)))
                 if mode == 'countdown':
                     text_line(str(max(1, math.ceil(countdown_until - elapsed))), height // 2 - 32, True)
                     text_line('Hold both buttons to cancel', height - 45)

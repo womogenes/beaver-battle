@@ -667,6 +667,18 @@ class Game:
                     velocity[axis] *= -1
         return velocity
 
+    def hit_zone(self, target):
+        """Where a shot counts, as circles: the whole hull of a canoe and the whole swim ring, as drawn.
+
+        Movement still uses the single small circle, so boats slip past obstacles as easily as before.
+        """
+        if isinstance(target, Player) and target.state == "canoe":
+            along = direction(target.heading) * target.radius * 1.35
+            return [(target.pos + along * step, target.radius) for step in (-1, -.5, 0, .5, 1)]
+        if isinstance(target, Player):
+            return [(target.pos, target.radius * 1.9)]
+        return [(target.pos, target.radius)]
+
     def trace(self, start, end, radius=0, owner=None, players=True, ignore=None):
         delta = end - start
         count = max(2, math.ceil(delta.length() / max(radius / 2, 1)) + 1)
@@ -691,7 +703,8 @@ class Game:
                 fraction = ((pygame.Vector2(clipped[0]) - start).dot(delta) / delta.length_squared()
                             if clipped and delta.length_squared() else None)
             else:
-                fraction = circle_hit(start, end, target.pos, radius + target.radius)
+                touches = [circle_hit(start, end, center, radius + reach) for center, reach in self.hit_zone(target)]
+                fraction = min((touch for touch in touches if touch is not None), default=None)
             if fraction is not None and 0 <= fraction <= closest:
                 closest, hit = fraction, target
         return start + delta * closest, hit
