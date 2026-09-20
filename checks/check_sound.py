@@ -48,7 +48,8 @@ game.new_match([1, 2])
 game.props.clear()
 for index, player in enumerate(game.players.values()):
     player.pos, player.heading, player.invulnerability = pygame.Vector2(300 + index * 200, 360), 0, 0
-game.update(1 / 60, {1: PlayerInput(1, (900, 360), True, False), 2: PlayerInput(2, (900, 360), False, False)})
+# One press of the second button throws one rock; the first button only aims.
+game.update(1 / 60, {1: PlayerInput(1, (900, 360), True, True), 2: PlayerInput(2, (900, 360), False, False)})
 assert "shoot" in game.sounds
 game.sounds.clear()
 target = game.players[2]
