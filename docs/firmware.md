@@ -223,6 +223,21 @@ inherited from an access point that does not exist. The payload is exactly the P
 v1 input packet, and the controllers broadcast rather than unicast so no board needs the
 receiver's MAC compiled into it.
 
+Measured on the bench, controller 1 on a power bank and the receiver on USB: the radio
+carried 601 packets in twelve seconds, exactly the 50 a second the controller sends, with
+no loss. Button masks crossed intact, 61 packets carrying button one and 88 carrying button
+two across 31 mask changes that followed the presses. Relayed into the real bridge, the
+game saw the controller and read `PlayerInput.fire` on 54 frames and `PlayerInput.special`
+on 75, which is button two arriving as player input with nothing of the venue network in
+the path.
+
+Two silences look alike here and are worth separating when this goes wrong. A controller
+that sends nothing and a receiver that hears nothing both read as zero packets, which is
+why the controllers report what their radio did; and ESP-NOW answers SEND_SUCCESS for a
+broadcast once the frame leaves the antenna, with no peer acknowledging it, so that counter
+proves transmission and never reception. The receiver's own count is the only evidence the
+link works.
+
 The relay gives every controller its own socket. The bridge treats a controller's endpoint
 as its identity and drops packets that seem to come from somewhere new while the old
 endpoint is still live, so one shared socket would make the two controllers look like
