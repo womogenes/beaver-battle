@@ -23,6 +23,22 @@ from beaver_battle.game import closed_shapes
 
 CELL = 8  # Water is simulated on a grid this coarse.
 
+# Valleys, as rock shapes in fractions of the board. The river always comes in down the left edge. Each is played twice
+# running, so both players build on it. `clock` scales attack_seconds to the map: checks/check_dam.py keeps every map as
+# fair as the first.
+MAPS = [
+    {"name": "THE VALLEY", "lodge": (.88, .53), "clock": 1.0,  # A funnel: wide at the mouth, narrow by the lodge.
+     "rocks": [[(0, 0), (1, 0), (1, .32), (.72, .32), (0, .135)], [(0, 1), (1, 1), (1, .74), (.72, .74), (0, .925)]]},
+    {"name": "THE ISLAND", "lodge": (.88, .53), "clock": 1.15,  # The same valley split by a rock: two channels to hold.
+     "rocks": [[(0, 0), (1, 0), (1, .32), (.72, .32), (0, .135)], [(0, 1), (1, 1), (1, .74), (.72, .74), (0, .925)]],
+     "islands": [((.40, .53), (.115, .12))]},
+    {"name": "THE BEND", "lodge": (.88, .73), "clock": 1.4,  # The river winds down to a lodge in the low corner.
+     "rocks": [[(0, 0), (1, 0), (1, .52), (.66, .52), (.46, .16), (0, .12)], [(0, 1), (1, 1), (1, .94), (.50, .94), (.30, .60), (0, .60)]]},
+    {"name": "THE FORK", "lodge": (.88, .53), "clock": 1.35,  # Two streams meet above the lodge: dam each, or dam the stem.
+     "rocks": [[(0, 0), (1, 0), (1, .34), (.66, .34), (0, .11)], [(0, 1), (1, 1), (1, .72), (.66, .72), (0, .95)],
+               [(0, .36), (.52, .53), (0, .70)]]},
+]
+
 
 @dataclass
 class DamIt:
@@ -34,6 +50,8 @@ class DamIt:
     timer: float = 0.0
     clock: float = 0.0
     rounds: int = 0
+    board_index: int = 0
+    board_rounds: int = 0  # Rounds played on this map; it changes once both players have built on it.
     builder: int = 1
     attacker: int = 2
     names: dict = field(default_factory=dict)
@@ -43,10 +61,14 @@ class DamIt:
     wood: np.ndarray | None = None  # The standing dam, once sealed.
     logs: np.ndarray | None = None  # Which of that wood belongs to closed shapes.
     sections: np.ndarray | None = None
+    seen: np.ndarray | None = None  # The marker ink the camera last reported while the builder draws.
+    eaten: np.ndarray | None = None  # Wood already gnawed off a piece that still stands: gone from sight, block by block.
+    gnawed: dict = field(default_factory=dict)  # section -> where its first bite landed
     strength: dict = field(default_factory=dict)  # section -> [bites left, bites when whole]
     wet: np.ndarray | None = None
     flow: float = 0.0
     flooded: float = 0.0
+    lost: float = 0.0  # The share of its strength the sealed dam gave up to excess wood.
     lodge: pygame.Vector2 = field(default_factory=pygame.Vector2)
     beaver: pygame.Vector2 = field(default_factory=pygame.Vector2)
     facing: float = -1.0
@@ -71,8 +93,9 @@ class DamIt:
     def name(self, player_id):
         return self.names.get(player_id) or f"PLAYER {player_id}"
 
-    def new_match(self, player_ids=(1, 2), swap=None):
-        """Roles swap every round unless told otherwise, so a pair of players each get both jobs."""
+    def new_match(self, player_ids=(1, 2), swap=None, board=None):
+        """Roles swap every round unless told otherwise, so a pair of players each get both jobs; the map moves on
+        once both have built on it, or to `board` when one is asked for."""
         ids = list(player_ids)[:2]
         if len(ids) != 2:
             raise ValueError("Dam It! is for exactly two players")
@@ -82,23 +105,31 @@ class DamIt:
         swap = self.rounds % 2 == 1 if swap is None else swap
         self.builder, self.attacker = (ids[1], ids[0]) if swap else (ids[0], ids[1])
         self.rounds += 1
+        if board is not None:
+            self.board_index, self.board_rounds = board % len(MAPS), 0
+        elif self.board_rounds >= 2:
+            self.board_index, self.board_rounds = (self.board_index + 1) % len(MAPS), 0
+        self.board_rounds += 1
+        layout = MAPS[self.board_index]
         w, h = self.width, self.height
-        self.lodge = pygame.Vector2(.88 * w, .53 * h)
-        self.beaver = pygame.Vector2(.965 * w, .53 * h)
-        # A funnel: the river comes in across the whole left side and the banks close in toward the lodge.
+        self.lodge = pygame.Vector2(layout["lodge"][0] * w, layout["lodge"][1] * h)
+        self.beaver = pygame.Vector2(.965 * w, self.lodge.y)
         solid = np.zeros((h, w), np.uint8)
-        top = [(0, 0), (w, 0), (w, .32 * h), (.72 * w, .32 * h), (0, .135 * h)]
-        bottom = [(0, h), (w, h), (w, .74 * h), (.72 * w, .74 * h), (0, .925 * h)]
-        for shape in (top, bottom):
-            cv2.fillPoly(solid, [np.array(shape, np.int32)], 1)
+        for shape in layout["rocks"]:
+            cv2.fillPoly(solid, [np.array([(x * w, y * h) for x, y in shape], np.int32)], 1)
+        for (x, y), (across, down) in layout.get("islands", ()):
+            cv2.ellipse(solid, (round(x * w), round(y * h)), (round(across * w), round(down * h)), 0, 0, 360, 1, -1)
         self.solid = solid.astype(bool)
         ys, xs = np.mgrid[0:h, 0:w]
         self.allowed = ~self.solid & (np.hypot(xs - self.lodge.x, ys - self.lodge.y) > self.setting("lodge_clearance", 105) * self.scale) \
             & (xs > 70 * self.scale) & (xs < .955 * w)
         self.ink = np.zeros((h, w), bool)
-        self.wood, self.logs, self.sections, self.strength = None, None, None, {}
+        self.wood, self.logs, self.sections, self.strength, self.eaten, self.gnawed = None, None, None, {}, None, {}
         self.wet = np.zeros((h // CELL, w // CELL), bool)
-        self.wet[:, 0] = True
+        # The river waits in the mouth of the valley, where no wood may go, so its edge is in plain view from the start.
+        self.wet[:, :max(1, round(70 * self.scale) // CELL)] = True
+        self.wet &= ~self.blocked_grid()
+        self.lost, self.seen = 0.0, None
         self.flow, self.flooded, self.clock, self.bite, self.gnaw, self.chewing, self.shown = 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0
         self.winner, self.verdict, self.pen, self.done_held = None, "", None, False
         self.sounds, self.particles, self.art, self.stale, self.camera_ink = ["go"], [], {}, True, False
@@ -110,6 +141,9 @@ class DamIt:
         """Wood is measured as the length of stroke it amounts to, so a filled shape costs what it covers."""
         mask = self.ink if mask is None else mask
         return float(mask.sum()) / max(1.0, self.setting("stroke", 10) * self.scale)
+
+    def attack_seconds(self):
+        return self.setting("attack_seconds", 25) * MAPS[self.board_index]["clock"]
 
     def total_strength(self, length):
         """Bites in the whole dam. One clean wall's worth of wood (free_wood) gets the full strength; past that the
@@ -142,7 +176,8 @@ class DamIt:
         joined = cv2.morphologyEx((ink | self.solid).astype(np.uint8), cv2.MORPH_CLOSE, kernel).astype(bool) & ~self.solid
         joined &= self.allowed | cv2.dilate(ink.astype(np.uint8), kernel).astype(bool)
         filled, shapes = closed_shapes(joined, 5, 700 * self.scale ** 2, .12 * self.width * self.height)
-        self.wood = filled & ~self.solid
+        ys, xs = np.mgrid[0:self.height, 0:self.width]
+        self.wood = filled & ~self.solid & (np.hypot(xs - self.lodge.x, ys - self.lodge.y) > .8 * self.setting("lodge_clearance", 105) * self.scale)
         self.logs = np.zeros(self.wood.shape, np.uint8)
         for shape in shapes:
             cv2.drawContours(self.logs, [shape.contour], -1, 1, -1)
@@ -196,10 +231,13 @@ class DamIt:
         areas = np.bincount(self.sections.ravel())
         total = max(1, int(areas[1:].sum()))
         budget = self.total_strength(self.wood_length(self.wood))
+        self.lost = 1 - budget / self.setting("strength", 270)
         # The short piece where a wall meets the bank must not be the cheap way in: no piece counts for less than
         # most of a typical one.
         typical = float(np.median(areas[1:][areas[1:] > 0])) if (areas[1:] > 0).any() else 0.0
-        self.strength = {index: [max(1.0, budget * max(areas[index], .75 * typical) / total)] * 2 for index in range(1, len(areas)) if areas[index]}
+        # However weak the dam, a bite takes only a mouthful: a big piece goes in several chomps, never all at once.
+        mouthful = (self.setting("bite_size", 70) * self.scale) ** 2
+        self.strength = {index: [max(1.0, areas[index] / mouthful, budget * max(areas[index], .75 * typical) / total)] * 2 for index in range(1, len(areas)) if areas[index]}
         self.stale = True
         self.phase, self.timer = "rising", self.setting("rise_seconds", 2.5)
         self.sounds.append("rush")
@@ -215,6 +253,8 @@ class DamIt:
         del self.sounds[:-32]
         self.clock += dt
         self.camera_ink = ink is not None
+        if ink is not None and self.phase == "building":
+            self.seen = ink & self.allowed
         for particle in self.particles:
             particle[0] += particle[2] * dt
             particle[1] += particle[3] * dt
@@ -230,7 +270,7 @@ class DamIt:
                 if self.lodge_flooded() >= self.setting("flood_goal", .5):
                     self.finish(self.attacker, "THE DAM LEAKED!")
                 else:
-                    self.phase, self.timer = "attack", self.setting("attack_seconds", 25)
+                    self.phase, self.timer = "attack", self.attack_seconds()
                     self.sounds.append("go")
         elif self.phase == "attack":
             self.update_attack(dt, inputs.get(self.attacker))
@@ -331,6 +371,7 @@ class DamIt:
         self.strength[section][0] -= 1
         self.sounds.append("chomp")
         self.chips(spot, 6, sprites.BARK_LIGHT)
+        self.nibble(section, spot)
         if self.strength[section][0] <= 0:
             self.wood[self.sections == section] = False
             self.logs[self.sections == section] = False
@@ -339,6 +380,22 @@ class DamIt:
             self.sounds += ["crack", "rush"]
             self.chips(spot, 18, sprites.BARK)
             self.chips(spot, 14, sprites.SKY_LIGHT)
+
+    def nibble(self, section, spot):
+        """Every bite takes a visible block out of the piece, spreading from where the first one landed, so the
+        attacker sees the work add up. The piece still holds water until its last bite: the bitten part is only
+        gone from the picture, and a sliver is always left standing until then."""
+        if self.eaten is None:
+            self.eaten = np.zeros(self.wood.shape, bool)
+        first = self.gnawed.setdefault(section, (spot.x, spot.y))
+        left, whole = self.strength[section]
+        ys, xs = np.nonzero(self.sections == section)
+        block = max(4, round(9 * self.scale))
+        # Whole blocks go, nearest the first bite first.
+        distance = np.hypot((xs // block) * block + block / 2 - first[0], (ys // block) * block + block / 2 - first[1])
+        gone = distance <= np.quantile(distance, min(.85, .85 * (1 - max(0.0, left) / whole)))
+        self.eaten[ys[gone], xs[gone]] = True
+        self.stale = True
 
     def chips(self, point, count, color):
         for index in range(count):
@@ -379,15 +436,51 @@ class DamIt:
     def ground(self):
         unit = self.scale
         surface = sprites.tiled_ground("grass.jpg", self.width, self.height, self.width, lighten=.35)
-        cliffs = sprites.tiled_ground("cobble.jpg", self.width, self.height, round(260 * unit))
-        surface.blit(self.masked(cliffs, self.solid, sprites.STONE_DARK, 7), (0, 0))
+        # The banks are timber, like everything else a beaver builds with: darker than the dam, so the two never blur.
+        banks = sprites.tiled_ground("bark.png", self.width, self.height, round(420 * unit))
+        shade = pygame.Surface(banks.get_size())
+        shade.fill((205, 190, 185))
+        banks.blit(shade, (0, 0), special_flags=pygame.BLEND_MULT)
+        surface.blit(self.masked(banks, self.solid, sprites.BARK_LINE, round(9 * unit) | 1), (0, 0))
         return surface
+
+    def water_picture(self):
+        """The river so far, with its edge drawn the way a map draws a shore: a dark line where the water stops and a
+        band of white foam just inside it, so how far it has come reads from across the room."""
+        unit = self.scale
+        river = self.sprite(("river",), lambda: sprites.tiled_ground("water.jpg", self.width, self.height, round(620 * unit)))
+        smooth = cv2.resize(self.wet.astype(np.float32), (self.width, self.height), interpolation=cv2.INTER_LINEAR)
+        water = smooth > .5
+        # The grid stops a cell short of anything solid; the picture runs the water right up to the rock and the wood.
+        # The brush is thinner than a stroke, so water never shows on the far side of a dam.
+        water = cv2.dilate(water.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (round(17 * unit) | 1, round(17 * unit) | 1))).astype(bool) & ~self.solid
+        if self.wood is not None:
+            water &= ~self.wood
+        sheet = self.masked(river, water)
+        if not water.any():
+            return sheet
+        round_brush = lambda size: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (round(size * unit) | 1, round(size * unit) | 1))
+        # Only the front that faces dry ground or wood is marked; where water lies along the rock there is no news.
+        dry = ~water & ~self.solid
+        front = cv2.dilate(dry.astype(np.uint8), round_brush(27)).astype(bool) & water
+        foam = front & ~cv2.erode(water.astype(np.uint8), round_brush(13), borderValue=1).astype(bool)
+        line = cv2.dilate(water.astype(np.uint8), round_brush(9)).astype(bool) & dry
+        if self.wood is not None:
+            line &= ~self.wood
+        plain = pygame.Surface((self.width, self.height))
+        for color, mask in ((sprites.WHITE, foam), (sprites.BLUE, line)):
+            if mask.any():
+                plain.fill(color)
+                sheet.blit(self.masked(plain, mask), (0, 0))
+        return sheet
 
     def dam_picture(self):
         """Open strokes are sticks, closed shapes are bark logs; what has been chewed away is simply gone."""
         unit = self.scale
         sheet = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         wood = self.ink & self.allowed if self.wood is None else self.wood
+        if self.eaten is not None and self.wood is not None:
+            wood = wood & ~self.eaten
         logs = np.zeros(wood.shape, bool) if self.logs is None else self.logs
         sticks = wood & ~logs
         if sticks.any():
@@ -408,9 +501,10 @@ class DamIt:
         frame = self.sprite(("frame",), lambda: pygame.Surface((self.width, self.height), 0, 24))
         frame.blit(self.sprite(("ground",), self.ground), (0, 0))
         # The river: the wet grid, blown up and softened so its edge creeps rather than steps.
-        river = self.sprite(("river",), lambda: sprites.tiled_ground("water.jpg", self.width, self.height, round(620 * unit), lighten=.15))
-        smooth = cv2.resize(self.wet.astype(np.float32), (self.width, self.height), interpolation=cv2.INTER_LINEAR)
-        frame.blit(self.masked(river, (smooth > .5) & ~self.solid), (0, 0))
+        amount = int(self.wet.sum())
+        if self.art.get(("water amount",)) != amount or self.stale:
+            self.art[("water amount",)], self.art[("water",)] = amount, self.water_picture()
+        frame.blit(self.art[("water",)], (0, 0))
         if self.stale:
             self.art[("dam",)] = self.dam_picture()
             self.stale = False
@@ -451,34 +545,49 @@ class DamIt:
         pygame.draw.rect(frame, sprites.CREAM, bar)
         pygame.draw.line(frame, sprites.INK, bar.bottomleft, bar.bottomright, max(2, round(3 * unit)))
         title = sprites.sign("DAM IT!", max(14, round(24 * unit)), sprites.BLUE_BRIGHT)
-        frame.blit(title, title.get_rect(midleft=(16 * unit, bar.centery)))
+        frame.blit(title, title.get_rect(midleft=(16 * unit, bar.centery - 9 * unit)))
+        place = sprites.sign(MAPS[self.board_index]["name"], max(10, round(15 * unit)))
+        frame.blit(place, place.get_rect(midleft=(16 * unit, bar.centery + 15 * unit)))
         if self.phase == "building":
-            message = f"{self.name(self.builder)}: BUILD A DAM TO KEEP THE LODGE DRY   {max(0, math.ceil(self.timer))}"
+            message = f"{self.name(self.builder)}: BUILD A DAM TO KEEP THE LODGE DRY"
         elif self.phase == "rising":
-            message = "THE RIVER RISES..."
+            message = "THE RIVER RISES..." if not self.strength else f"THE RIVER RISES...   DAM AT {1 - self.lost:.0%} STRENGTH"
         elif self.phase == "attack":
-            message = f"{self.name(self.attacker)}: CHEW THROUGH!   {max(0, math.ceil(self.timer))}"
+            message = f"{self.name(self.attacker)}: CHEW THROUGH BEFORE THE TIME RUNS OUT!"
         else:
             message = ""
         if message:
-            line = sprites.sign(message, max(16, round(30 * unit)))
-            frame.blit(line, line.get_rect(center=(self.width / 2 - 40 * unit, bar.centery)))
+            left_edge, right_edge = max(title.get_width(), place.get_width()) + 40 * unit, self.width - 128 * unit
+            line = sprites.fitted(sprites.sign(message, max(16, round(30 * unit))), right_edge - left_edge)
+            frame.blit(line, line.get_rect(center=((left_edge + right_edge) / 2, bar.centery)))
+        if self.phase in ("building", "attack"):
+            whole = self.setting("build_seconds", 30) if self.phase == "building" else self.attack_seconds()
+            sprites.time_bar(frame, (self.width * .2, bar.bottom + 12 * unit, self.width * .6, 18 * unit), self.timer / whole, self.clock)
         if self.phase == "building":
-            # The rule that matters, shown live: more wood, weaker pieces.
-            used = self.wood_length() / self.setting("max_wood", 2600)
-            bites = self.bites_per_piece() if self.ink.any() else 0
-            lost = 1 - self.total_strength(self.wood_length()) / self.setting("strength", 270)
-            grade = "NO WOOD YET" if not bites else f"EACH PIECE: {bites:.0f} BITES" + (f"   TOO MUCH WOOD: DAM {lost:.0%} WEAKER" if lost > .05 else "")
-            meter = pygame.Rect(0, 0, 300 * unit, 20 * unit)
-            meter.midbottom = (self.width / 2, self.height - 54 * unit)
-            pygame.draw.rect(frame, sprites.INK, meter.inflate(8 * unit, 8 * unit), border_radius=round(14 * unit))
-            pygame.draw.rect(frame, sprites.WHITE, meter, border_radius=round(10 * unit))
-            pygame.draw.rect(frame, sprites.BARK, (meter.x, meter.y, meter.width * min(1, used), meter.height), border_radius=round(10 * unit))
-            words = sprites.sign(f"WOOD USED     {grade}", max(14, round(24 * unit)))
-            frame.blit(words, words.get_rect(midbottom=(self.width / 2, meter.top - 8 * unit)))
-            if not self.camera_ink:
-                hint = sprites.sign("Hold the left button to draw wood from bank to bank.  More wood = a weaker dam.  Right click when done.", max(12, round(20 * unit)))
-                frame.blit(hint, hint.get_rect(center=(self.width / 2, self.height - 22 * unit)))
+            # The rule that matters, shown live: more wood, a weaker dam. On a whiteboard the meter follows whatever
+            # marker ink the camera has reported so far; until it has seen any, the rule is spelled out instead.
+            drawn = self.seen if self.camera_ink else self.ink
+            if drawn is not None and drawn.any():
+                used = self.wood_length(drawn) / self.setting("max_wood", 2600)
+                lost = 1 - self.total_strength(self.wood_length(drawn)) / self.setting("strength", 270)
+                grade = f"EACH PIECE: {self.bites_per_piece(drawn):.0f} BITES" + (f"   TOO MUCH WOOD: DAM {lost:.0%} WEAKER" if lost > .05 else "")
+                meter = pygame.Rect(0, 0, 300 * unit, 20 * unit)
+                meter.midbottom = (self.width / 2, self.height - 54 * unit)
+                pygame.draw.rect(frame, sprites.INK, meter.inflate(8 * unit, 8 * unit), border_radius=round(14 * unit))
+                pygame.draw.rect(frame, sprites.WHITE, meter, border_radius=round(10 * unit))
+                pygame.draw.rect(frame, sprites.BARK, (meter.x, meter.y, meter.width * min(1, used), meter.height), border_radius=round(10 * unit))
+                words = sprites.fitted(sprites.sign(f"WOOD USED     {grade}", max(14, round(24 * unit))), self.width * .9)
+                frame.blit(words, words.get_rect(midbottom=(self.width / 2, meter.top - 8 * unit)))
+            else:
+                line = sprites.sign("DRAW YOUR DAM FROM BANK TO BANK", max(14, round(28 * unit)))
+                frame.blit(line, line.get_rect(center=(self.width / 2, self.height - 62 * unit)))
+            how = "One clean line is strongest: extra or thick wood makes the whole dam weaker." + ("" if self.camera_ink else "  Right click when done.")
+            hint = sprites.sign(how, max(12, round(20 * unit)))
+            frame.blit(hint, hint.get_rect(center=(self.width / 2, self.height - 22 * unit)))
+        if self.lost > .05 and (self.phase == "rising" or (self.phase == "attack" and self.timer > self.attack_seconds() - 5)):
+            # The verdict on the drawing, for both players, once the dam has been read.
+            line = sprites.sign(f"TOO MUCH WOOD: THE DAM IS {self.lost:.0%} WEAKER", max(14, round(30 * unit)))
+            frame.blit(line, line.get_rect(center=(self.width / 2, self.height - 64 * unit)))
         if self.phase in ("attack", "rising"):
             gauge = pygame.Rect(0, 0, 150 * unit, 18 * unit)
             gauge.midtop = (self.lodge.x, self.lodge.y + 62 * unit)

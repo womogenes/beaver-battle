@@ -71,8 +71,8 @@ def simulated_walls(width, height):
 
 def menu_choices(mode):
     if mode == 'lobby':
-        return ['Start match', 'Calibrate board', 'How to play', 'Change game', 'Quit']
-    return ['Resume', 'New match', 'Calibrate board', 'How to play', 'Change game', 'Quit']
+        return ['Start match', 'Calibrate board', 'Change game', 'Quit']
+    return ['Resume', 'New match', 'Calibrate board', 'Change game', 'Quit']  # How to play is the (i) button in every game.
 
 
 def display_test(pygame, screen, display_index, seconds=0):
@@ -667,6 +667,9 @@ def main():
                     elif mode == 'treasure' and treasure.solo and next_button.collidepoint(event.pos):
                         mode, map_pick = 'maps', treasure.board_index
                         continue
+                    elif mode == 'dam' and next_button.collidepoint(event.pos):
+                        dam.new_match(ids[:2], board=dam.board_index + 1)
+                        continue
                     elif menu_button.collidepoint(event.pos):
                         mode, selection = ('home' if mode in ('treasure', 'dam') else 'lobby'), 0
                         continue
@@ -675,6 +678,9 @@ def main():
                     continue
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_n and mode == 'treasure' and treasure.solo and treasure.phase == 'match_over':
                     mode, map_pick = 'maps', treasure.board_index
+                    continue
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_n and mode == 'dam' and dam.phase == 'match_over':
+                    dam.new_match(ids[:2], board=dam.board_index + 1)
                     continue
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and (playing or mode == 'pause'):
                     if pause_button.collidepoint(event.pos):
@@ -836,16 +842,15 @@ def main():
                         else:
                             mode = 'calibration'
                             vision.begin_calibration()
-                    elif choice == 'How to play':
-                        mode, info_return, info_frame = 'info', mode, frame_count
                     elif choice == 'Change game':
                         mode = 'home'
                     elif choice == 'Resume':
                         mode, status = resume_mode, ''
-                    elif choice == 'New match' and resume_mode in ('treasure', 'dam'):
-                        mode, menu_message = start_chosen()
                     elif choice == 'New match':
-                        mode, selection = 'lobby', 0
+                        # Always the game that was paused, whatever the chooser last pointed at.
+                        chosen = 'dam' if resume_mode == 'dam' else ('solo' if treasure.solo else 'treasure') if resume_mode == 'treasure' else 'battle'
+                        mode, menu_message = start_chosen()
+                        selection = 0
                     else:
                         count = 2
                         if len(active_ids) < count:
@@ -994,13 +999,16 @@ def main():
                 active_game().draw(screen)
                 if mode in ('game', 'treasure', 'dam') and active_game().phase == 'match_over':
                     solo_over = mode == 'treasure' and treasure.solo
-                    # Solo gets three: the same board again, the next board, or out.
-                    again_button.center = (width // 2 - (330 if solo_over else 170), height - 96)
+                    three = solo_over or mode == 'dam'
+                    # Solo and Dam It! get three: the same board again, another board, or out.
+                    again_button.center = (width // 2 - (330 if three else 170), height - 96)
                     next_button.center = (width // 2, height - 96)
-                    menu_button.center = (width // 2 + (300 if solo_over else 210), height - 96)
+                    menu_button.center = (width // 2 + (300 if three else 210), height - 96)
                     hints = [('RETRY' if solo_over else 'SWAP ROLES' if mode == 'dam' else 'PLAY AGAIN', 'Enter' if args.simulate else 'button 1', again_button)]
                     if solo_over:
                         hints.append(('CHANGE MAP', 'N', next_button))
+                    elif mode == 'dam':
+                        hints.append(('NEXT MAP', 'N', next_button))
                     hints.append(('MENU', 'Space' if args.simulate else 'button 2', menu_button))
                     for words, how, button in hints:
                         hover = button.collidepoint(pygame.mouse.get_pos())
@@ -1025,7 +1033,8 @@ def main():
                     text_line('Hold both buttons to cancel', height - 45)
             else:
                 screen.fill((224, 239, 241))
-                text_line('BEAVER BATTLE', 80, True)
+                paused = resume_mode if mode == 'pause' else None
+                text_line('DAM IT!' if paused == 'dam' else 'TREASURE DASH' if paused == 'treasure' else 'BEAVER BATTLE', 80, True)
                 if mode == 'names':
                     text_line("WHO'S PLAYING?", 196)
                     for index, player_id in enumerate(ids):
@@ -1052,16 +1061,18 @@ def main():
                         button = pygame.Rect(0, 0, 470, 54)
                         button.center = (width // 2, 250 + index * 64)
                         menu_rects.append(button)
-                        chosen = index == selection
-                        pygame.draw.rect(screen, sprites.BLUE, button.inflate(8, 8), border_radius=32)
-                        pygame.draw.rect(screen, sprites.BLUE if chosen else sprites.WHITE, button, border_radius=28)
-                        face = sprites.lettering(choice, 34, sprites.WHITE if chosen else sprites.BLUE, 1)
+                        lit = index == selection  # Not `chosen`: that is which game was picked.
+                        pygame.draw.rect(screen, sprites.BLUE, button.inflate(8, 8), border_radius=8)
+                        pygame.draw.rect(screen, sprites.BLUE if lit else sprites.WHITE, button, border_radius=5)
+                        face = sprites.lettering(choice, 34, sprites.WHITE if lit else sprites.BLUE, 1)
                         screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
                 text_line(menu_message or status or ('Type a name, then Enter.  Enter alone keeps the one shown.' if mode == 'names' else
-                                                     'Hold both buttons to cancel' if mode == 'ready' else ('Click a button, or press Down then Enter' if args.simulate else 'Hold button 1 to aim; hover a button and press button 2')), height - 100)
+                                                     'Hold both buttons to cancel' if mode == 'ready' else ''), height - 100)
                 camera_status = 'simulated' if forced else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
                 lasers = 'no lasers connected: using mouse and keyboard' if args.simulate and not forced else f'Connected: {active_ids}'
-                text_line(f'{lasers}    Camera: {camera_status}', height - 55)
+                if not forced and (snapshot.error or not snapshot.calibrated):
+                    # Only worth a line when something needs doing; a working setup keeps the menu clean.
+                    text_line(f'{lasers}    Camera: {camera_status}', height - 55)
             if preview and mode in ('lobby', 'pause') and snapshot.preview is not None:
                 import cv2
                 image = cv2.cvtColor(snapshot.preview, cv2.COLOR_BGR2RGB)

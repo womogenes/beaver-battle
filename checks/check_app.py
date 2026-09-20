@@ -187,6 +187,19 @@ def no_lasers(run, state):
         run.done = True
 
 
+def new_match_same_game(run, state):
+    """New match from the pause menu restarts the game that was paused, not whichever the chooser defaults to."""
+    mode = state['mode']
+    if run.stage == 0 and mode == 'dam' and run.frames >= 3:
+        run.stage = 1
+        return [key(pygame.K_ESCAPE)]
+    if run.stage == 1 and mode == 'pause' and run.frames >= 8:  # The menu has been drawn a few times by now.
+        run.stage = 2
+        return [key(pygame.K_DOWN), key(pygame.K_RETURN)]
+    if run.stage == 2 and run.frames >= 14:
+        run.done = True
+
+
 def laser_pointer(run, state):
     """With a controller connected, its laser dot hovers the menu in place of the trackpad."""
     if state['mode'] == 'lobby' and run.frames >= 3:
@@ -198,7 +211,7 @@ def laser_select(run, state):
         assert state['selection'] == 0, 'FIRE illuminates without cycling the menu'
     run.buttons[1] = (True, False)
     run.buttons[2] = (True, run.frames >= 2)
-    if state['mode'] == 'info':
+    if state['mode'] == 'home':
         run.done = True
         return []
     pending = run.posted[run.checkpoint:]
@@ -209,7 +222,7 @@ def laser_select(run, state):
 def laser_select_gap(run, state):
     run.press_edge = run.frames == 2
     run.missing_aim = run.frames <= (8 if run.fault == 'expired' else 3)
-    if state['mode'] == 'info':
+    if state['mode'] == 'home':
         assert run.fault != 'expired'
         run.done = True
     if run.frames == 10:
@@ -267,6 +280,9 @@ def main():
     for method in ('keyboard', 'controller'):
         Scenario(calibration_cancel, method).run()
 
+    again = Scenario(new_match_same_game, active=[], calibrated=False, argv=['beaver-battle', '--no-names', '--game', 'dam']).run()
+    assert [mode for mode, elapsed in again.history] == ['dam', 'pause', 'dam'], again.history
+
     fallback = Scenario(no_lasers, active=[], calibrated=False)
     fallback.run()
     assert [mode for mode, elapsed in fallback.history][-3:] == ['ready', 'countdown', 'game'], fallback.history
@@ -284,11 +300,11 @@ def main():
     for fault in ('brief', 'expired'):
         Scenario(laser_select_gap, fault).run()
     border = Scenario(laser_select, aim=(712, 350)).run()
-    assert any(mode == 'info' for mode, elapsed in border.history), 'Visible outline must be clickable'
+    assert any(mode == 'home' for mode, elapsed in border.history), 'Visible outline must be clickable'
     selected = Scenario(laser_select).run()
     clicks = [event for event in selected.posted if event.type == pygame.MOUSEBUTTONDOWN]
     assert len(clicks) == 1 and clicks[0].pos == (640, 360), 'Player 2 clicks its hovered item once per press'
-    assert any(mode == 'info' for mode, elapsed in selected.history), 'Hover plus button 2 opens How to play'
+    assert any(mode == 'home' for mode, elapsed in selected.history), 'Hover plus button 2 chooses Change game'
     with patch.object(pygame.draw, 'circle', wraps=pygame.draw.circle) as circles:
         Scenario(laser_pointer).run()
     rings = [call.args[1] for call in circles.call_args_list if len(call.args) >= 4 and call.args[3] == 19]
@@ -302,7 +318,7 @@ def main():
     bench.vision.start.assert_called_once()
     assert bench.game.new_match.call_count == 2, 'One startup match plus one built from the board scan'
     assert bench.game.update.call_count > 0, 'Bench must reach live physics without controllers'
-    print('App lifecycle, guarded resume, calibration cancellation, mouse fallback without lasers, laser as pointer, '
+    print('App lifecycle, guarded resume, new match keeps its game, calibration cancellation, mouse fallback without lasers, laser as pointer, '
           'bench autostart, and cleanup checks passed.')
 
 

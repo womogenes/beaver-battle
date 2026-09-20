@@ -23,8 +23,10 @@ BOARDS = [
     # their written size; only the rocks are shrunk and scattered.
     {"name": "TWIN LAKES", "rocks": [(.30, .53, .042), (.30, .40, .034), (.30, .66, .034), (.41, .31, .028), (.41, .75, .028)],
      "ponds": [(.24, .30, .10, .17)]},
-    {"name": "THE MOAT", "rocks": [(.31, .40, .034), (.31, .66, .034), (.21, .53, .036), (.40, .22, .028), (.40, .84, .028)],
-     "ponds": [(.5, .53, .15, .24)], "islands": [(.5, .53, .075, .125)]},
+    # The chest sits on an island. Swim the moat, or go the long way round to a portal that lands beside it.
+    {"name": "THE MOAT", "logs": 3, "rocks": [(.31, .40, .034), (.31, .66, .034), (.21, .53, .036), (.40, .22, .028), (.40, .84, .028),
+                                              (.15, .34, .03), (.15, .72, .03), (.25, .22, .03), (.24, .84, .03)],
+     "ponds": [(.5, .53, .20, .33)], "islands": [(.5, .53, .16, .27)], "portals": [((.30, .22), (.43, .53))]},
     {"name": "ROCK GARDEN", "rocks": [(.20, .30, .03), (.20, .53, .03), (.20, .76, .03), (.29, .41, .03), (.29, .65, .03),
                                       (.38, .30, .03), (.38, .76, .03), (.445, .42, .024), (.445, .64, .024)],
      "ponds": [(.37, .53, .045, .13)]},
@@ -54,8 +56,9 @@ SOLO_BOARDS = [
      "rocks": [(.22, .30, .035), (.30, .74, .035), (.52, .16, .04), (.70, .76, .035), (.80, .32, .035)],
      "ponds": [(.50, .52, .15, .21), (.40, .40, .10, .14), (.60, .66, .11, .15), (.50, .80, .07, .13), (.50, .95, .06, .10),
                (.30, .30, .07, .08), (.72, .50, .08, .07)]},
-    {"name": "PORTAL WOODS", "whole": True, "deer": 2, "trees": 4,
-     "rocks": [(.30, .53, .035), (.72, .50, .035), (.46, .84, .034), (.56, .20, .034)],
+    {"name": "PORTAL WOODS", "whole": True, "deer": 3, "trees": 8, "logs": 4,
+     "rocks": [(.30, .53, .035), (.72, .50, .035), (.46, .84, .034), (.56, .20, .034), (.18, .38, .032), (.40, .16, .03),
+               (.63, .82, .032), (.84, .38, .03), (.52, .68, .03), (.26, .70, .03)],
      "ponds": [(.22, .12, .10, .12), (.32, .24, .09, .12), (.42, .36, .09, .12), (.51, .49, .09, .12), (.60, .62, .09, .12),
                (.69, .75, .09, .12), (.79, .88, .10, .12)],
      "portals": [((.20, .80), (.62, .30)), ((.40, .66), (.80, .66))]},
@@ -75,11 +78,12 @@ def scattered(board, shrink):
         return all(math.hypot((x - px) * 16 / 9, y - .53) > reach + .075 for px in pads) and .16 < y < .93 and .13 < x <= (.87 if whole else .5)
 
     rocks, ponds = [], []
+    sizes = (1.0, 1.55, .7, 1.25, .6, 1.4, .85)  # Pebbles to boulders, in a fixed order so a duel stays mirrored.
     for index, (x, y, r) in enumerate(board["rocks"]):
-        rocks.append((x, y, r * shrink))
+        rocks.append((x, y, r * shrink * sizes[index % len(sizes)]))
         side, lift = (.052 if index % 2 else -.052), (.118 if index % 3 else -.118)
         if clear(x + side, y + lift, r * shrink):
-            rocks.append((x + side, y + lift, r * shrink * .8))
+            rocks.append((x + side, y + lift, r * shrink * sizes[(index + 3) % len(sizes)] * .8))
     for index, (x, y, rx, ry) in enumerate(board.get("ponds", [])):
         ponds.append((x, y, rx, ry))  # Water is drawn at its written size, with no stray puddles scattered round it.
     islands = [(x, y, rx * shrink, ry * shrink) for x, y, rx, ry in board.get("islands", [])]
@@ -314,6 +318,7 @@ class Treasure:
                 self.logs += [(first, second, 7 * unit) for first, second in pairs]
                 if not self.passable():
                     del self.logs[-len(pairs):]
+        self.bar_the_way(whole, pads)
         for index in range(self.board.get("boosts", self.setting("boost_clusters", 2)) * half):
             point, angle = spot(30 * unit), rng.uniform(0, math.tau)
             if point is not None:
@@ -325,6 +330,51 @@ class Treasure:
             point = spot(30 * unit, everywhere=True, dry=True)
             if point is not None:
                 self.deer.append(Deer(point, point.copy(), rng.uniform(0, 2)))
+
+    def legs(self, runner):
+        """Every stretch a lazy route could take in one stroke: start to chest, start to a portal, a portal to the chest."""
+        ends = [end for first, second, index in self.portals for end in (first, second)]
+        pairs = [(runner.start, self.chest)] + [(runner.start, end) for end in ends] + [(end, self.chest) for end in ends]
+        return [(first, second) for first, second in pairs if first.distance_to(second) > 200 * self.scale]
+
+    def beeline(self, first, second, bow, lean=1.0, steps=90):
+        """A lazy route between two places: the straight line, bowed sideways by `bow` pixels. `lean` moves the top of
+        the bow toward one end or the other, so a single early or late swerve counts as lazy too."""
+        across = second - first
+        side = pygame.Vector2(-across.y, across.x).normalize()
+        return [first + across * (step / steps) + side * bow * math.sin(math.pi * (step / steps) ** lean) for step in range(steps + 1)]
+
+    def open_beelines(self, runner):
+        """The straightish strokes, out of a fan of bows on every leg, that meet no rock, tree or stick on the way."""
+        found = []
+        for first, second in self.legs(runner):
+            reach = min(self.setting("beeline_bow", 170) * self.scale, .3 * first.distance_to(second))
+            found += [(first, second, bow, lean) for lean in (1.0, .55, 1.8) for bow in np.linspace(-reach, reach, 15)
+                      if all(self.blocked_at(point) is None for point in self.beeline(first, second, bow, lean)[6:-6])]
+        return found
+
+    def bar_the_way(self, whole, pads):
+        """No board may be won with straight strokes: wherever one is still open, to the chest or to and from a portal,
+        a stick is laid across it (mirrored in a duel), as long as some real route to the chest is left."""
+        unit, rng = self.scale, self.rng
+        runner = next(iter(self.runners.values()))
+        for attempt in range(160):
+            clear = self.open_beelines(runner)
+            if not clear:
+                return
+            first, second, bow, lean = clear[len(clear) // 2] if attempt % 2 else rng.choice(clear)
+            route = self.beeline(first, second, bow, lean)
+            point = route[round(len(route) * rng.uniform(.4, .78))]  # Late on the line, so it tempts before it stops you.
+            ahead = (second - first).normalize()
+            arm = pygame.Vector2(-ahead.y, ahead.x).rotate(rng.uniform(-20, 20)) * rng.uniform(55, 85) * unit
+            ends = [point - arm, point + arm]
+            if any(end.distance_to(pad) < 95 * unit for end in ends + [point] for pad in pads) or \
+                    any(segment_distance(end, *ends) < 50 * unit for a, b, index in self.portals for end in (a, b)):
+                continue
+            pairs = [tuple(ends)] if whole else [tuple(ends), tuple(pygame.Vector2(self.width - end.x, end.y) for end in ends)]
+            self.logs += [(first, second, 7 * unit) for first, second in pairs]
+            if not self.passable():
+                del self.logs[-len(pairs):]
 
     def passable(self):
         return all(len(self.bot_plan(runner)) > 2 for runner in self.runners.values())
@@ -343,7 +393,7 @@ class Treasure:
         return None
 
     def begin_drawing(self):
-        self.phase, self.timer = "drawing", self.setting("draw_seconds", 30)
+        self.phase, self.timer = "drawing", self.setting("draw_seconds", 15)
         self.sounds.append("go")
         for player_id in self.bots:
             runner = self.runners[player_id]
@@ -864,8 +914,8 @@ class Treasure:
         pygame.draw.line(frame, sprites.INK, bar.bottomleft, bar.bottomright, max(2, round(3 * unit)))
         if self.phase == "drawing":
             turn = self.drawing[0] if self.drawing and not self.camera_ink else None
-            who = f"{self.name(turn)}: " if turn is not None else ""
-            message = f"{who}DRAW YOUR PATH TO THE CHEST   {max(0, math.ceil(self.timer))}"
+            who = f"{self.name(turn)}: " if turn is not None and not self.solo else ""
+            message = f"{who}DRAW YOUR PATH TO THE CHEST"
         elif self.phase == "checking":
             message = "CHECKING THE PATHS..."
         elif self.phase == "running":
@@ -874,14 +924,21 @@ class Treasure:
             message = ""
         title = sprites.sign(self.board["name"], max(14, round(24 * unit)), sprites.BLUE_BRIGHT)
         frame.blit(title, title.get_rect(midleft=(16 * unit, bar.centery)))
-        if message:
-            line = sprites.sign(message, max(16, round(32 * unit)))
-            frame.blit(line, line.get_rect(center=(self.width / 2, bar.centery)))
+        # The header is three things in a row: the board's name, the message, and (solo) the time. The message takes
+        # what is left between the other two, shrinking if it has to, so nothing is ever written over anything else.
+        left_edge, right_edge = title.get_width() + 40 * unit, self.width - 128 * unit
         if self.solo and self.phase in ("running", "checking", "drawing"):
             best = f"BEST TODAY  {self.standings[0][1]:.2f}  {self.standings[0][0]}" if self.standings else "NO TIME YET TODAY"
             words = sprites.sign(f"{self.race_time:5.1f} s" if self.phase == "running" else best, max(14, round((34 if self.phase == "running" else 22) * unit)),
                                  sprites.BLUE if self.phase == "running" else sprites.BLUE_BRIGHT)
-            frame.blit(words, words.get_rect(midright=(self.width - 128 * unit, bar.centery)))
+            words = sprites.fitted(words, 300 * unit)
+            frame.blit(words, words.get_rect(midright=(right_edge, bar.centery)))
+            right_edge -= words.get_width() + 24 * unit
+        if message:
+            line = sprites.fitted(sprites.sign(message, max(16, round(32 * unit))), right_edge - left_edge)
+            frame.blit(line, line.get_rect(center=((left_edge + right_edge) / 2, bar.centery)))
+        if self.phase == "drawing":
+            sprites.time_bar(frame, (self.width * .2, bar.bottom + 12 * unit, self.width * .6, 18 * unit), self.timer / self.setting("draw_seconds", 15), self.clock)
         if self.phase == "running":
             for index, runner in enumerate(self.runners.values()):
                 # Boost meter: full means button 2 will fire it.
