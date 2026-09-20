@@ -107,6 +107,7 @@ def main():
     parser.add_argument('--headless', action='store_true', help='run without a window, using simulated controllers')
     parser.add_argument('--seconds', type=float, default=0, help='exit after this many simulation seconds; 0 means unlimited')
     parser.add_argument('--screenshot', type=Path, help='save the last rendered frame')
+    parser.add_argument('--diagnostics-dir', type=Path, help='save live camera, wall mask and status once per second')
     parser.add_argument('--report', type=Path, help='write a JSON smoke-test summary')
     parser.add_argument('--calibrate', action='store_true', help='start with projected calibration markers')
     parser.add_argument('--fullscreen', action='store_true')
@@ -184,6 +185,9 @@ def main():
     bridge = ControllerBridge(config)
     scheduler = IdentityScheduler(config)
     game = Game(config)
+    if not args.simulate:
+        from beaver_battle.geometry import GeometryWorker
+        game.geometry = GeometryWorker(config)
     mode = 'game' if args.simulate else ('calibration' if args.calibrate else 'lobby')
     # Names are typed on the laptop before a match; unattended runs skip the question.
     ask_names = not (args.headless or args.bench or args.seconds or args.no_names)
@@ -271,6 +275,9 @@ def main():
     disconnected_since = None
     countdown_until = 0.0
     projection_due = 0.0
+    diagnostic_due = 0.0
+    diagnostic_frame = 0
+    diagnostic_time = time.monotonic()
     menu_message = ''
     status = ''
     preview = False
@@ -866,6 +873,7 @@ def main():
                     game.new_match(ids, walls)
                     mode, countdown_until = 'countdown', elapsed + 3.0
             elif mode == 'countdown':
+                game.update(0, {})  # Install the fixed board while the countdown runs.
                 if not args.bench and any(player_id not in active_ids for player_id in ids):
                     mode, ready = 'ready', set()
                 elif elapsed >= countdown_until:
@@ -1081,9 +1089,26 @@ def main():
             pygame.display.flip()
             # Vision needs what we just projected to tell a shadow from dark artwork.
             # Reading the framebuffer costs real time, so only at the wall update rate.
-            if not forced and mode in ('game', 'countdown') and now >= projection_due:
+            if not forced and mode != 'calibration' and now >= projection_due:
                 projection_due = now + 1 / max(1.0, float(config['camera'].get('wall_update_hz', 10)))
                 vision.set_projection(np.transpose(pygame.surfarray.array3d(screen), (1, 0, 2)), now)
+            if args.diagnostics_dir and now >= diagnostic_due:
+                import cv2
+                args.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+                if snapshot.preview is not None:
+                    cv2.imwrite(str(args.diagnostics_dir / 'camera.jpg'), snapshot.preview)
+                if snapshot.walls is not None:
+                    cv2.imwrite(str(args.diagnostics_dir / 'walls.png'), snapshot.walls.astype(np.uint8) * 255)
+                diagnostic = dict(mode=mode, calibrated=snapshot.calibrated, error=snapshot.error,
+                    controllers=active_ids, aims=dict(snapshot.aims),
+                    confidence=dict(snapshot.confidence),
+                    frame_age=max(0.0, now - snapshot.timestamp),
+                    buttons={player: dict(fire=value.fire, special=value.special)
+                             for player, value in inputs.items()},
+                    wall_fraction=float(snapshot.walls.mean()) if snapshot.walls is not None else None,
+                    fps=(frame_count - diagnostic_frame) / max(.001, now - diagnostic_time))
+                (args.diagnostics_dir / 'status.json').write_text(json.dumps(diagnostic))
+                diagnostic_due, diagnostic_time, diagnostic_frame = now + 1, now, frame_count
             previous = {player_id: (value.fire, value.special) for player_id, value in inputs.items()}
             if args.seconds and elapsed >= args.seconds:
                 running = False
@@ -1100,6 +1125,8 @@ def main():
             args.report.write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps(report))
     finally:
+        if game.geometry is not None:
+            game.geometry.stop()
         bridge.stop()
         if not forced:
             vision.stop()

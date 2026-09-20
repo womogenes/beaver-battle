@@ -206,6 +206,10 @@ def check_obstacles():
     assert not obstacles(lit.astype(np.uint8), reference, gain, canvas).any(), \
         "Projected artwork is predicted away, however dark it is drawn"
 
+    for offset in (-80, -40, 40):
+        changed = np.clip(lit + offset, 0, 255).astype(np.uint8)
+        assert not obstacles(changed, reference, gain, canvas).any(), 'Ambient change must not flood obstacles'
+
     # A hand blocks the beam over part of that art and reflects less than the board.
     shadowed = lit.copy()
     hand = np.zeros((height, width), np.uint8)
@@ -381,8 +385,13 @@ def check_fast_tracking():
 
     abrupt = seeded_tracker(max_speed=3000)
     abrupt.update(points, 1 + 1 / 30)
-    assert abrupt.update([(100, 100), (100, 500)], 1 + 2 / 30)[0] == {}, \
-        "An instantaneous reversal outside the prediction gate safely loses tracking"
+    assert abrupt.update([(100, 100), (100, 500)], 1 + 2 / 30)[0] == {1: (100, 100), 2: (100, 500)}, \
+        "An instantaneous reversal within the displacement gate retains identities"
+    for index, x in enumerate((200, 100, 200, 100, 200, 100), 3):
+        assert abrupt.update([(x, 500), (x, 100)], 1 + index / 30)[0] == {1: (x, 100), 2: (x, 500)}, \
+            "Repeated sharp turns must not require stationary frames to reacquire"
+    assert abrupt.update([(600, 100), (600, 500)], 1 + 9 / 30)[0] == {}, \
+        "A physically implausible jump still invalidates identities"
 
     for settings in ({}, {"laser_max_speed": 3000, "laser_max_gate": 150}):
         vision = Vision({"camera": settings})

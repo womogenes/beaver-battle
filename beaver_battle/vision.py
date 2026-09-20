@@ -1,7 +1,7 @@
 """Latest-frame UVC capture, planar calibration, physical walls, and red aims.
 
 Preview arrays are BGR camera pixels. Aims and walls use logical display pixels.
-No camera control (exposure, gain, white balance) is changed by this module.
+Exposure changes only when camera.exposure_us is explicitly configured for V4L2.
 """
 
 import platform
@@ -51,13 +51,20 @@ def capture_backend(name=""):
 
 def open_capture(config):
     camera = config.get("camera", {})
-    capture = cv2.VideoCapture(camera.get("device", 0), capture_backend(camera.get("backend", "")))
+    backend = capture_backend(camera.get("backend", ""))
+    capture = cv2.VideoCapture(camera.get("device", 0), backend)
     if capture.isOpened():
         capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera.get("width", 1280)))
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera.get("height", 720)))
         capture.set(cv2.CAP_PROP_FPS, float(camera.get("fps", 30)))
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if camera.get("exposure_us") is not None:
+            if backend != cv2.CAP_V4L2:
+                print("camera.exposure_us is only supported for V4L2; leaving exposure unchanged", flush=True)
+            elif not (capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) and
+                      capture.set(cv2.CAP_PROP_EXPOSURE, float(camera["exposure_us"]) / 100)):
+                print("Camera rejected configured manual exposure; check its controls", flush=True)
     return capture
 
 
@@ -376,6 +383,9 @@ def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
     expected = cv2.GaussianBlur(expected_board(reference, gain, canvas), (0, 0), blur)
     observed = cv2.GaussianBlur(warped.astype(np.float32), (0, 0), blur)
     difference = expected - observed
+    # A global ambient-light shift is not a local physical obstacle. Use robust
+    # per-channel offsets so a smaller hand/shadow remains a residual deficit.
+    difference -= np.median(difference[::8, ::8], axis=(0, 1))
     blue, green, red = cv2.split(difference)
     deficit = cv2.max(cv2.max(blue, green), red)
     mask = (deficit > float(threshold)).astype(np.uint8)
@@ -480,7 +490,13 @@ class LaserTracker:
             elapsed = max(0.0, timestamp - track.timestamp)
             prediction = track.position + track.velocity * min(elapsed, 0.1)
             gate = min(self.max_gate, 24.0 + self.max_speed * elapsed)
-            distances = np.linalg.norm(locations - prediction, axis=1)
+            predicted_distances = np.linalg.norm(locations - prediction, axis=1)
+            observed_distances = np.linalg.norm(locations - track.position, axis=1)
+            # A hand can reverse immediately. Velocity predicts the next observation,
+            # but must not veto a dot still within the physical displacement gate.
+            # Taking the lower cost also keeps conflicting stationary/moving
+            # assignments ambiguous instead of trusting stale velocity at a turn.
+            distances = np.minimum(predicted_distances, observed_distances)
             choices[player_id] = [int(index) for index in np.flatnonzero(distances <= gate)]
             costs[player_id] = distances ** 2
         players = list(active)

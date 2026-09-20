@@ -236,3 +236,35 @@ instead of the earlier room's 100. Recalibration at that exposure reduced the
 observed mask to about 7%. This is a room-specific hardware adjustment, not an
 automatic exposure policy or proof of robust tracking in every environment;
 longer exposure can increase motion blur. Recheck it after reconnecting the camera.
+
+### Live geometry and changing illumination
+
+Real-camera Beaver Battle copies the board scan at match start and prepares its
+collision geometry in a background worker. Physics waits for that initial geometry
+without blocking rendering. The same board is retained through every round of the
+match; subsequent camera noise, shadows and new drawings do not change it. Starting
+a new match takes a fresh scan and invalidates pending results. Laser tracking
+continues live throughout. Simulation and small geometry checks remain synchronous.
+Connected-component linking stores only neighboring component pairs, rather than
+allocating a square matrix for every speck of camera noise.
+
+Projected frames are handed to vision in menus as well as gameplay, so menu text
+and buttons can be subtracted instead of learned as ink. Obstacle residuals subtract
+a robust per-channel whole-frame brightness offset before detecting local shadows.
+Checks cover uniform ambient shifts, preserved local hand shadows, dark fields,
+edge contours, slow geometry and thousands of isolated noise components. These
+are bounded robustness checks, not proof under every lighting condition.
+
+`--diagnostics-dir /tmp/beaver-live` writes the latest camera image, wall mask and
+status (FPS, calibration, connected controllers and aim positions) once per second.
+`camera.exposure_us` is optional, local and V4L2-only; camera open/reconnect reapplies
+it. Unsupported backends or rejected controls report a warning rather than guessing
+another backend's exposure units. Changing exposure still requires recalibration.
+
+On the current Linux/Arducam setup, a 20-second real-camera bot match after these
+changes completed 1,031 rendered frames (about 52 FPS), with live ink fraction
+around 3% and no geometry stall. Both controllers were connected during the
+subsequent production run. Duplicate production, relay and game launches were
+physically attempted and rejected without disturbing the original processes.
+V4L2 manual exposure enum 1 and exposure value 300 were accepted and read back.
+Lighting-transition and moving-laser validation still require physical tests.

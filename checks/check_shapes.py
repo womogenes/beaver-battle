@@ -227,3 +227,14 @@ cv2.line(mixed, (600, 450), (850, 450), 1, 3)
 assert len(stroke_ends(mixed)) == 2, 'Separate thin strokes still supply repair ends'
 assert mixed[100, 100] == 1, 'Repair filtering must not erase filled collision geometry'
 print('Dense-mask repair avoids thinning solid regions while retaining thin-stroke ends')
+# Thousands of isolated noisy pixels must not allocate a component-count-squared matrix.
+noise = np.zeros((240, 320), np.uint8)
+noise[::4, ::4] = 1
+original_full = np.full
+def bounded_full(shape, *args, **kwargs):
+    assert int(np.prod(shape)) <= noise.size * 4, 'Quadratic component-pair allocation'
+    return original_full(shape, *args, **kwargs)
+with patch.object(np, 'full', bounded_full):
+    cleaned = link_strokes(noise, 10, 40)
+assert np.array_equal(cleaned, noise), 'Noise must not be joined into invented walls'
+print('Noisy component linking uses bounded sparse pair storage')

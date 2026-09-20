@@ -105,9 +105,14 @@ def main():
         import serial
     except ImportError:
         parser.error('pyserial is needed: uv run --with pyserial python -m beaver_battle.relay ...')
+    from beaver_battle.instance import claim
+    try:
+        instance = claim('relay')
+    except RuntimeError as error:
+        parser.exit(1, str(error) + '\n')
     relay = Relay(args.host, args.udp)
     reported = time.monotonic()
-    with serial.Serial(args.port, args.baud, timeout=0.005, write_timeout=0.1) as link:
+    with serial.Serial(args.port, args.baud, timeout=0.005, write_timeout=0.1, **({'exclusive': True} if sys.platform != 'win32' else {})) as link:
         print(f'relaying {args.port} -> {args.host}:{args.udp}; controllers appear as they speak',
               flush=True)
         pending = bytearray()
@@ -127,6 +132,9 @@ def main():
                     reported = time.monotonic()
                     seen = ', '.join(f'{k}:{v}' for k, v in sorted(relay.counts.items())) or 'nothing yet'
                     print(f'packets relayed  {seen}', flush=True)
+        except serial.SerialException as error:
+            print(f'Receiver disconnected: {error}. Reconnect it and restart the production launcher.', file=sys.stderr)
+            raise SystemExit(1) from None
         except KeyboardInterrupt:
             pass
         finally:
