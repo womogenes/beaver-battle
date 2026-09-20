@@ -538,6 +538,8 @@ def main():
             key_confirm = False
             key_cycle = False
             for event in pygame.event.get():
+                if getattr(event, 'laser_mode', mode) != mode:
+                    continue
                 if event.type == pygame.QUIT:
                     running = False
                 if event.type == pygame.KEYDOWN and mode == 'names' and event.key != pygame.K_ESCAPE:
@@ -737,7 +739,7 @@ def main():
                 walls = snapshot.walls
                 inputs = bridge.inputs(snapshot, now)
                 active_ids = bridge.active_ids(now)
-                scheduler.update(now, bridge, vision, mode not in ('calibration', 'pause'))
+                scheduler.update(now, bridge, vision, mode != 'calibration')
                 bridge.send(now)
                 args.simulate = not active_ids
                 if args.simulate:
@@ -750,12 +752,10 @@ def main():
                     active_ids = ids
                     walls = walls if snapshot.calibrated and walls is not None else practice_walls
                 else:
-                    # Lasers are connected: the lowest controller's dot stands in for the trackpad. It
-                    # hovers over buttons through the same path as the mouse; making a controller button
-                    # count as a click is one more posted event here.
                     pointer = inputs.get(min(active_ids))
-                    if pointer is not None and pointer.aim is not None and mode in ('home', 'players', 'lobby', 'pause', 'scores', 'info'):
+                    if pointer is not None and pointer.aim is not None:
                         laser_at = (round(pointer.aim[0]), round(pointer.aim[1]))
+                    if laser_at is not None and mode in ('home', 'players', 'maps', 'lobby', 'pause', 'scores', 'info'):
                         pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=laser_at, rel=(0, 0), buttons=(0, 0, 0)))
             host = min(active_ids, default=1)
             host_input = inputs.get(host, PlayerInput(host, connected=False))
@@ -763,6 +763,18 @@ def main():
             driven = args.simulate or args.bench
             cycle = key_cycle or (not driven and host_input.fire and not old_fire)
             confirm = key_confirm or (not driven and host_input.special and not old_special)
+            pointer_menu = mode in ('home', 'players', 'maps', 'lobby', 'pause', 'scores', 'info')
+            if pointer_menu and not driven:
+                # FIRE illuminates the pointer; it must not also change selection.
+                cycle, confirm = key_cycle, key_confirm
+                for player_id in sorted(active_ids):
+                    control = inputs.get(player_id)
+                    was_special = previous.get(player_id, (False, False))[1]
+                    if control and control.connected and control.aim is not None and control.special and not was_special:
+                        position = tuple(round(value) for value in control.aim)
+                        pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=position, rel=(0, 0), buttons=(0, 0, 0)))
+                        pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=position, button=1, laser_mode=mode))
+                        break  # At most one menu action per frame.
             if mode in ('game', 'ready', 'countdown', 'calibration') and host_input.fire and host_input.special and not driven:
                 both_since = now if both_since is None else both_since
                 if now - both_since >= 1:
@@ -1024,7 +1036,7 @@ def main():
                         face = sprites.lettering(choice, 34, sprites.WHITE if chosen else sprites.BLUE, 1)
                         screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
                 text_line(menu_message or status or ('Type a name, then Enter.  Enter alone keeps the one shown.' if mode == 'names' else
-                                                     'Hold both buttons to cancel' if mode == 'ready' else ('Click a button, or press Down then Enter' if args.simulate else 'Click, or button 1 to choose and button 2 to confirm')), height - 100)
+                                                     'Hold both buttons to cancel' if mode == 'ready' else ('Click a button, or press Down then Enter' if args.simulate else 'Hold button 1 to aim; hover a button and press button 2')), height - 100)
                 camera_status = 'simulated' if forced else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
                 lasers = 'no lasers connected: using mouse and keyboard' if args.simulate and not forced else f'Connected: {active_ids}'
                 text_line(f'{lasers}    Camera: {camera_status}', height - 55)
@@ -1033,10 +1045,17 @@ def main():
                 image = cv2.cvtColor(snapshot.preview, cv2.COLOR_BGR2RGB)
                 image = pygame.surfarray.make_surface(np.transpose(image, (1, 0, 2)))
                 screen.blit(pygame.transform.smoothscale(image, (width // 4, height // 4)), (width * 3 // 4, 0))
-            if laser_at is not None:
-                # Where the game thinks the laser is, so a player can see it track their dot.
-                pygame.draw.circle(screen, sprites.BLUE, laser_at, 16, 4)
-                pygame.draw.circle(screen, sprites.WHITE, laser_at, 11, 3)
+            if not forced and not args.bench and mode != 'calibration':
+                for player_id in active_ids:
+                    control = inputs.get(player_id)
+                    if control is None or not control.connected or control.aim is None:
+                        continue
+                    position = tuple(round(value) for value in control.aim)
+                    color = (35, 90, 220) if player_id == 1 else (20, 155, 115)
+                    pygame.draw.circle(screen, color, position, 19, 4)
+                    pygame.draw.circle(screen, sprites.WHITE, position, 14, 2)
+                    label = sprites.lettering(str(player_id), 20, color, 1)
+                    screen.blit(label, (position[0] + 23, position[1] - 12))
             pygame.display.flip()
             # Vision needs what we just projected to tell a shadow from dark artwork.
             # Reading the framebuffer costs real time, so only at the wall update rate.

@@ -114,3 +114,11 @@ instead of waiting for unsupported command acknowledgements. Hold FIRE and keep 
 two dots apart during acquisition. If only one dot is detectable while both gates are
 on, the software cannot safely infer both identities. For the older bidirectional
 Wi-Fi firmware, select `identity_mode = "acknowledged"`.
+
+Laser pointers are shown as numbered rings: player 1 blue, player 2 green. Hold
+button 1 to illuminate the laser, aim at a menu button, then press button 2 to
+select it. Either controller can click at its own tracked position; the lowest
+connected controller supplies the primary hover highlight. Holding button 1 no
+longer cycles menu choices. Missing tracking does not click a previously selected
+item. Keyboard and mouse navigation remain available, and laser navigation works
+in the pause menu too.
