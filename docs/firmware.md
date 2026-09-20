@@ -211,6 +211,21 @@ much of the time the laser is lit. A frame where tracking simply missed the dot 
 exactly like a gap, so any measure of duty is confounded by dropouts, while random
 dropouts leave the period where it is and only lower the confidence in it.
 
+Measured on the bench with a flashed controller held on the board for 16 seconds, at
+30 fps: the dark runs came back at a median of exactly 133 ms, the programmed gap, and
+autocorrelation recovered the period as exactly 600 ms. Correlation at controller 1's own
+period was +0.70 against -0.21 and -0.18 at the other two candidates, so the right answer
+is strongly positive while the wrong ones are negative rather than merely smaller.
+
+Identifying the controller from a sliding window of that capture: 92 percent right from
+one second, 97 from one and a half, 100 percent from three seconds with the winning
+period beating the runner-up by 0.68. That is better than the simulation predicted.
+
+The dot was seen on 72 percent of frames, against a programmed duty of 78, so a few
+frames were lost beyond the gaps themselves and the lit runs came back at 333 ms rather
+than 467. Identification was unaffected, which is the whole reason for keying on period
+rather than duty: dropouts lower the correlation peak without moving it.
+
 The 133 ms default is four frames at 30 fps. Simulating the measured tracking reliability,
 four frames identified the right controller from a three second window on 99 percent of
 trials while the dot was held steady, against 90 percent for a three frame gap; at the 44
