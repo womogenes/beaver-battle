@@ -243,7 +243,18 @@ Beware of measuring a window in which nobody was holding the button. Several run
 setting this up read as a weak or failing laser, and the laser was simply not lit; a
 measurement of laser strength is only meaningful alongside evidence the laser was on.
 
-The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
+Controller 1 never blinks. Blinking costs detection, since a dot that is dark cannot be
+tracked and a frame that missed it looks exactly like a gap, so the one controller that
+needs no gap in order to be recognised is better off without one: it is the dot with no
+periodic gaps, and it keeps all of its light for tracking. That also leaves only two blink
+patterns to tell apart rather than three, and 800 against 1000 was already the easier pair.
+
+Identification is therefore: no periodicity and the highest duty is controller 1, gaps
+every 800 ms is controller 2, every 1000 ms is controller 3. The duty matters as well as
+the periodicity, because a controller whose gaps are being missed looks steady, and only
+its lower share of lit frames tells it apart from a laser that never blinks at all.
+
+For controllers 2 and 3 the gap is 22 percent of the period, so 176 and 220 ms, and
 `BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
 longest period the smallest share and therefore the least signal to correlate: simulated at
 the dropout rate measured on the bench, a fixed 133 ms identified controller 3 correctly on

@@ -21,11 +21,19 @@ uint32_t laser_identity_period_ms(int controller_id)
 
 uint32_t laser_identity_gap_ms(int controller_id)
 {
-    /* The gap is a fixed share of the period, not a fixed number of milliseconds. One
-       fixed gap made the longest period the weakest: 133 ms is 22 percent of 600 but only
-       13 percent of 1000, so the longest period carried the least signal to correlate and
-       was identified correctly on 88 percent of three second windows where the shortest
-       managed 100. Holding the share constant brings all three to 100. */
+    /* Controller 1 never blinks. Blinking costs detection, since a dot that is dark
+       cannot be tracked and a frame that missed it looks the same as a gap, so the one
+       controller that needs no gap to be recognised is better off without one: it is the
+       dot that never goes dark, and it keeps the whole of its light for tracking.
+
+       The others take a fixed share of their period rather than a fixed number of
+       milliseconds. One fixed gap made the longest period the weakest, since 133 ms is 22
+       percent of 600 but only 13 percent of 1000, so the longest carried the least signal
+       to correlate and was identified correctly on 88 percent of three second windows
+       where the shortest managed 100. Holding the share constant brings them level. */
+    if (controller_id == 1) {
+        return 0;
+    }
     return laser_identity_period_ms(controller_id) * 22 / 100;
 }
 

@@ -59,7 +59,7 @@ def sketch_period(controller_id):
 
 
 def sketch_gap(controller_id):
-    return sketch_period(controller_id) * 22 // 100
+    return 0 if controller_id == 1 else sketch_period(controller_id) * 22 // 100
 
 
 def sketch_level(controller_id, elapsed):
@@ -95,6 +95,15 @@ def check_parity():
     assert lines[6] == sketch_button(debounce), "button settle differs from button_update"
 
 
+def check_controller_one_never_blinks():
+    """Controller 1 is identified by the absence of gaps, so it must never have one."""
+    from subprocess import run
+    assert sketch_gap(1) == 0
+    assert all(sketch_level(1, ms) for ms in range(4000)), "controller 1 must stay lit"
+    assert not all(sketch_level(2, ms) for ms in range(4000)), "controller 2 must blink"
+    assert not all(sketch_level(3, ms) for ms in range(4000)), "controller 3 must blink"
+
+
 def check_the_laser_starts_dark():
     """Nothing may light the laser but a held button, at power-up or ever."""
     for sketch in SKETCHES:
@@ -119,6 +128,7 @@ def check_one_sketch_per_controller():
 
 
 check_parity()
+check_controller_one_never_blinks()
 check_the_laser_starts_dark()
 check_one_sketch_per_controller()
 print("Blink checks passed: three sketches agree with the firmware on period, gap, blink "

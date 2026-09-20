@@ -31,11 +31,14 @@ uint32_t identityPeriodMs(int controllerId) {
 // often the gap comes round, never from how much of the time the laser is on: a frame
 // where tracking missed the dot looks exactly like a gap, so a duty measurement is
 // confounded by dropouts, while random dropouts leave the period where it is.
-// A constant share of the period, matching laser_identity_gap_ms() in controller.c. One
-// fixed gap made the longest period the weakest: 133 ms is 22 percent of 600 but only 13
-// percent of 1000, so the longest carried the least signal and was identified correctly on
-// 88 percent of three second windows where the shortest managed 100.
+// Matching laser_identity_gap_ms() in controller.c. Controller 1 never blinks: blinking
+// costs detection, and the one controller that needs no gap to be recognised keeps all of
+// its light for tracking. The others take a constant share of their period, since one
+// fixed gap made the longest period the weakest at 88 percent against 100.
 uint32_t identityGapMs(int controllerId) {
+  if (controllerId == 1) {
+    return 0;   // controller 1 never blinks; that is what identifies it
+  }
   return identityPeriodMs(controllerId) * 22 / 100;
 }
 
