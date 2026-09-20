@@ -192,6 +192,7 @@ def main():
     menu_button = pygame.Rect(0, 0, 220, 66)
     menu_button.center = (width // 2 + 210, height - 96)
     again = False
+    menu_rects = []
     if mode == 'game' and ask_names:
         mode = 'names'
     ids = list(range(1, config['game']['players'] + 1))
@@ -303,6 +304,13 @@ def main():
                 if mode == 'info' and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
                     mode = info_return
                     continue
+                if mode in ('lobby', 'pause') and event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
+                    # The menu is a column of real buttons: pointing at one selects it, clicking chooses it.
+                    for index, rect in enumerate(menu_rects):
+                        if rect.collidepoint(event.pos):
+                            selection = index
+                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                                key_confirm = True
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and mode == 'game' and game.phase == 'match_over':
                     if again_button.collidepoint(event.pos):
                         again = True
@@ -536,10 +544,18 @@ def main():
                     for index, player_id in enumerate(ids):
                         text_line(f'{game.name(player_id)}: {"READY" if player_id in ready else "waiting"}', 260 + index * 55)
                 else:
+                    menu_rects = []
                     for index, choice in enumerate(menu_choices(mode)):
-                        text_line(('> ' if index == selection else '') + choice, 240 + index * 55)
+                        button = pygame.Rect(0, 0, 470, 54)
+                        button.center = (width // 2, 250 + index * 64)
+                        menu_rects.append(button)
+                        chosen = index == selection
+                        pygame.draw.rect(screen, sprites.BLUE, button.inflate(8, 8), border_radius=32)
+                        pygame.draw.rect(screen, sprites.BLUE if chosen else sprites.WHITE, button, border_radius=28)
+                        face = sprites.lettering(choice, 34, sprites.WHITE if chosen else sprites.BLUE, 1)
+                        screen.blit(face, face.get_rect(center=(button.centerx, button.centery - 2)))
                 text_line(menu_message or status or ('Type a name, then Enter.  Enter alone keeps the one shown.' if mode == 'names' else
-                                                     'Hold both buttons to cancel' if mode == 'ready' else 'Button 1: choose     Button 2: confirm'), height - 100)
+                                                     'Hold both buttons to cancel' if mode == 'ready' else ('Click a button, or press Down then Enter' if args.simulate else 'Click, or button 1 to choose and button 2 to confirm')), height - 100)
                 camera_status = 'simulated' if args.simulate else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
                 text_line(f'Connected: {active_ids}    Camera: {camera_status}', height - 55)
             if preview and mode in ('lobby', 'pause') and snapshot.preview is not None:
