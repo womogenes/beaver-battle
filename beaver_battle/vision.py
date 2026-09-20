@@ -419,6 +419,7 @@ class LaserTracker:
     tracks: dict = field(default_factory=dict)
     max_speed: float = 1200.0
     ambiguity_pixels: float = 18.0
+    max_gate: float = 180.0
 
     def accept(self, player_id, point, timestamp, identified=False):
         point = np.asarray(point, dtype=float)
@@ -466,7 +467,7 @@ class LaserTracker:
         for player_id, track in active.items():
             elapsed = max(0.0, timestamp - track.timestamp)
             prediction = track.position + track.velocity * min(elapsed, 0.1)
-            gate = min(180.0, 24.0 + self.max_speed * elapsed)
+            gate = min(self.max_gate, 24.0 + self.max_speed * elapsed)
             distances = np.linalg.norm(locations - prediction, axis=1)
             choices[player_id] = [int(index) for index in np.flatnonzero(distances <= gate)]
             costs[player_id] = distances ** 2
@@ -617,7 +618,9 @@ class Vision:
         self.frame_ready.clear()
         self.frame = None
         camera = self.config.get("camera", {})
-        self.tracker = LaserTracker(float(camera.get("stale_seconds", 0.5)))
+        self.tracker = LaserTracker(stale_seconds=float(camera.get("stale_seconds", 0.5)),
+                                    max_speed=float(camera.get("laser_max_speed", 1200.0)),
+                                    max_gate=float(camera.get("laser_max_gate", 180.0)))
         self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
         self.process_thread = Thread(target=self.process_loop, name="vision-process", daemon=True)
         self.capture_thread = Thread(target=self.capture_loop, name="vision-capture", daemon=True)

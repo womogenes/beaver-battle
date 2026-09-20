@@ -348,6 +348,45 @@ def check_identity():
     assert crossing.update([(145, 100), (95, 100)], 3.0)[0] == {}, "Stale identities cannot reacquire from motion"
 
 
+def check_fast_tracking():
+    # Keep two identities well separated vertically while they sweep and reverse.
+    def seeded_tracker(**settings):
+        tracker = LaserTracker(**settings)
+        tracker.update([(100, 100)], 1.0, 1)
+        tracker.update([(100, 500)], 1.0, 2)
+        return tracker
+
+    points = [(200, 100), (200, 500)]
+    assert seeded_tracker().update(points, 1 + 1 / 30)[0] == {}, "Legacy speed gate rejects a 100px/frame jump"
+    tracker = seeded_tracker(max_speed=3000)
+    # Two stationary observations let the velocity estimate settle at the turn.
+    positions = (200, 300, 400, 500, 500, 500, 400, 300, 200, 100)
+    for index, x in enumerate(positions, 1):
+        aims = tracker.update([(x, 500), (x, 100)], 1 + index / 30)[0]
+        assert aims == {1: (x, 100), 2: (x, 500)}, (index, aims)
+    limited = seeded_tracker(max_speed=3000, max_gate=80)
+    assert limited.update(points, 1 + 1 / 30)[0] == {}, "The configured absolute gate still caps motion"
+
+    crossing = LaserTracker(max_speed=3000)
+    crossing.update([(100, 100)], 2.0, 1)
+    crossing.update([(300, 100)], 2.0, 2)
+    assert crossing.update([(200, 100)], 2 + 1 / 30)[0] == {}, "Faster gates must still reject merged dots"
+    assert crossing.update([(100, 100), (300, 100)], 2 + 2 / 30)[0] == {}, "Separation must not invent identities after crossing"
+
+    abrupt = seeded_tracker(max_speed=3000)
+    abrupt.update(points, 1 + 1 / 30)
+    assert abrupt.update([(100, 100), (100, 500)], 1 + 2 / 30)[0] == {}, \
+        "An instantaneous reversal outside the prediction gate safely loses tracking"
+
+    for settings in ({}, {"laser_max_speed": 3000, "laser_max_gate": 150}):
+        vision = Vision({"camera": settings})
+        with patch.object(vision, "capture_loop"), patch.object(vision, "process_loop"):
+            vision.start()
+            vision.stop()
+        assert vision.tracker.max_speed == settings.get("laser_max_speed", 1200)
+        assert vision.tracker.max_gate == settings.get("laser_max_gate", 180)
+
+
 def check_walls():
     walls = WallFilter(3)
     empty = np.zeros((12, 16), bool)
@@ -577,6 +616,7 @@ check_backend()
 check_candidates()
 check_laser_on_a_whiteboard()
 check_identity()
+check_fast_tracking()
 check_walls()
 check_pipeline()
 check_cancel_calibration()

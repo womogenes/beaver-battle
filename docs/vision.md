@@ -173,3 +173,18 @@ intentional blink and transition pauses. This proves physical acquisition and
 association now operate through the ESP-NOW telemetry path; it does not establish
 fast-motion accuracy, crossing robustness, or continuous two-player aiming.
 Captures and raw telemetry remain outside git.
+
+### Fast pointer movement
+
+`camera.laser_max_speed` controls the continuation search around a dot's predicted
+position, in logical board pixels/second. `camera.laser_max_gate` caps its radius.
+The current defaults are 3000 and 180, giving about 124 pixels at 30 fps versus
+64 with the previous speed of 1200. These settings do not create identities or
+bypass merged-dot checks. Abrupt reversals can still exceed the prediction gate,
+and widening it increases the possibility of a plausible wrong association when
+two indistinguishable dots cross. Reacquisition still needs a solo illumination
+window. Motion blur and the 30 fps capture limit remain physical constraints.
+
+Separately, `game.turn_speed` is now 720 degrees/second rather than 240: with a
+valid stationary aim and no obstacle interference, a 180-degree turn takes 0.25 s
+instead of 0.75 s. These are configured bounds, not measured end-to-end latency.

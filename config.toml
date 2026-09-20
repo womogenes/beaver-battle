@@ -38,6 +38,8 @@ laser_merge = 13 # Join pieces of one dot this close, under the tracker's ambigu
 laser_max_area = 300 # Measured on the board, dots run to 210 with a median of 103, so
 # 180 cut through the top of the dot's own range and discarded about five percent of
 # real detections. Nothing else inside the board comes near this size.
+laser_max_speed = 3000.0 # Logical pixels/second allowed when continuing an identified dot.
+laser_max_gate = 180.0 # Maximum association radius; retain overlap/identity ambiguity checks.
 identity_interval = 1.5
 identity_mode = "telemetry" # ESP-NOW gate reports; "acknowledged" for bidirectional Wi-Fi firmware.
 identity_window = 0.18
@@ -54,7 +56,7 @@ players = 2
 width = 1280
 height = 720
 canoe_speed = 240.0
-turn_speed = 240.0
+turn_speed = 720.0 # Degrees/second: a 180-degree turn takes 0.25 s with a valid aim.
 aim_deadzone = 24.0
 beaver_speed = 75.0
 beaver_boost_speed = 150.0
