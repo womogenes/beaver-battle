@@ -65,3 +65,8 @@ Coordinates are logical projector pixels, origin at top-left, x right and y down
 - User rejected the gentle servo trial as insufficient to dispense. Restore the
   full calibrated 990→570→990 µs targets, 500 ms per phase, retaining radio safety,
   cooldown and idle PWM shutdown. Actual boards must be reflashed individually.
+
+- Controller 2's squeeze direction was subsequently reversed at the user's request:
+  rest 570 µs, squeeze 990 µs, return 570 µs. Controller 1 stays at
+  990→570→990 µs. Apply controller-specific values in the local firmware
+  configuration; generic defaults are not a substitute for these calibrations.
