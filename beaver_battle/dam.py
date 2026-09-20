@@ -111,10 +111,18 @@ class DamIt:
         mask = self.ink if mask is None else mask
         return float(mask.sum()) / max(1.0, self.setting("stroke", 10) * self.scale)
 
+    def total_strength(self, length):
+        """Bites in the whole dam. One clean wall's worth of wood (free_wood) gets the full strength; past that the
+        dam as a whole gets weaker, so piling wood on is worse than useless: every piece is both a smaller share
+        and a share of less."""
+        spare = self.setting("free_wood", 450) * self.scale / max(1.0, length)
+        return self.setting("strength", 270) * min(1.0, spare) ** self.setting("excess_penalty", 1.0)
+
     def bites_per_piece(self, mask=None):
         """What one section of a plain stroke would take to chew through if the dam were sealed now."""
-        pieces = max(1.0, self.wood_length(mask) / (self.setting("section", 40) * self.scale))
-        return max(1.0, self.setting("strength", 270) / pieces)
+        length = self.wood_length(mask)
+        pieces = max(1.0, length / (self.setting("section", 40) * self.scale))
+        return max(1.0, self.total_strength(length) / pieces)
 
     def scribble(self, start, end):
         if self.wood_length() >= self.setting("max_wood", 2600):
@@ -139,16 +147,38 @@ class DamIt:
         for shape in shapes:
             cv2.drawContours(self.logs, [shape.contour], -1, 1, -1)
         self.logs = cv2.dilate(self.logs, kernel).astype(bool) & self.wood if shapes else self.logs.astype(bool)
+        # Cut the dam into pieces about a section long. Seeds are spread through each connected run of wood, each new
+        # one as far as possible from the rest, and every bit of wood joins its nearest seed. A stroke is therefore
+        # cut across, into lengths of its full thickness, wherever on the board it was drawn; a fixed grid would
+        # split a stroke lying along a grid line into two thin half-walls.
+        # Thick wood is cut into pieces as wide as it is thick, so a slab is never layers to tunnel through: one
+        # piece gone and the water is through it.
         count, labels = cv2.connectedComponents(self.wood.astype(np.uint8))
         size = max(8, round(self.setting("section", 40) * self.scale))
-        ys, xs = np.mgrid[0:self.height, 0:self.width]
-        keys = (labels.astype(np.int64) * 4096 + (ys // size)) * 4096 + (xs // size)
-        keys[~self.wood] = -1
-        names, inverse = np.unique(keys, return_inverse=True)
-        self.sections = inverse.reshape(keys.shape).astype(np.int32) + (0 if names[0] == -1 else 1)
-        self.sections[~self.wood] = 0
-        # A grid cut leaves slivers at the corners. A sliver would be a piece worth a bite or two, a weak spot the
-        # builder never drew, so each is folded into the neighbour it touches most.
+        self.sections = np.zeros(self.wood.shape, np.int32)
+        depth = cv2.distanceTransform(self.wood.astype(np.uint8), cv2.DIST_L2, 3)
+        span = min(301, 2 * int(depth.max()) + 3) | 1
+        thickness = 2 * cv2.dilate(depth, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
+        serial = 0
+        for label in range(1, count):
+            ys, xs = np.nonzero(labels == label)
+            spots = np.column_stack([xs, ys]).astype(np.float32)
+            # Seeds sit on the middle line of the wood, so the cuts between them run straight across it.
+            middle = depth[ys, xs] >= .35 * thickness[ys, xs]
+            first = int(middle.argmax())
+            seeds = [spots[first]]
+            nearest = np.hypot(*(spots - seeds[0]).T)
+            owner = np.zeros(len(spots), np.int32)
+            apart = np.maximum(size * .62, .9 * thickness[ys, xs])
+            while np.where(middle, nearest / apart, 0).max() > 1 and len(seeds) < 400:
+                seeds.append(spots[int(np.where(middle, nearest / apart, 0).argmax())])
+                reach = np.hypot(*(spots - seeds[-1]).T)
+                owner[reach < nearest] = len(seeds) - 1
+                nearest = np.minimum(nearest, reach)
+            self.sections[ys, xs] = serial + 1 + owner
+            serial += len(seeds)
+        # Any piece that still came out as a sliver would be worth a bite or two, a weak spot the builder never drew,
+        # so it is folded into the neighbour it touches most.
         touch = np.ones((5, 5), np.uint8)
         for repeat in range(3):
             areas = np.bincount(self.sections.ravel())
@@ -165,7 +195,11 @@ class DamIt:
                     self.sections[piece], self.wood[piece] = 0, False
         areas = np.bincount(self.sections.ravel())
         total = max(1, int(areas[1:].sum()))
-        self.strength = {index: [max(1.0, self.setting("strength", 270) * areas[index] / total)] * 2 for index in range(1, len(areas)) if areas[index]}
+        budget = self.total_strength(self.wood_length(self.wood))
+        # The short piece where a wall meets the bank must not be the cheap way in: no piece counts for less than
+        # most of a typical one.
+        typical = float(np.median(areas[1:][areas[1:] > 0])) if (areas[1:] > 0).any() else 0.0
+        self.strength = {index: [max(1.0, budget * max(areas[index], .75 * typical) / total)] * 2 for index in range(1, len(areas)) if areas[index]}
         self.stale = True
         self.phase, self.timer = "rising", self.setting("rise_seconds", 2.5)
         self.sounds.append("rush")
@@ -196,7 +230,7 @@ class DamIt:
                 if self.lodge_flooded() >= self.setting("flood_goal", .5):
                     self.finish(self.attacker, "THE DAM LEAKED!")
                 else:
-                    self.phase, self.timer = "attack", self.setting("attack_seconds", 22)
+                    self.phase, self.timer = "attack", self.setting("attack_seconds", 25)
                     self.sounds.append("go")
         elif self.phase == "attack":
             self.update_attack(dt, inputs.get(self.attacker))
@@ -433,7 +467,8 @@ class DamIt:
             # The rule that matters, shown live: more wood, weaker pieces.
             used = self.wood_length() / self.setting("max_wood", 2600)
             bites = self.bites_per_piece() if self.ink.any() else 0
-            grade = "NO WOOD YET" if not bites else f"EACH PIECE: {bites:.0f} BITES"
+            lost = 1 - self.total_strength(self.wood_length()) / self.setting("strength", 270)
+            grade = "NO WOOD YET" if not bites else f"EACH PIECE: {bites:.0f} BITES" + (f"   TOO MUCH WOOD: DAM {lost:.0%} WEAKER" if lost > .05 else "")
             meter = pygame.Rect(0, 0, 300 * unit, 20 * unit)
             meter.midbottom = (self.width / 2, self.height - 54 * unit)
             pygame.draw.rect(frame, sprites.INK, meter.inflate(8 * unit, 8 * unit), border_radius=round(14 * unit))
@@ -442,7 +477,7 @@ class DamIt:
             words = sprites.sign(f"WOOD USED     {grade}", max(14, round(24 * unit)))
             frame.blit(words, words.get_rect(midbottom=(self.width / 2, meter.top - 8 * unit)))
             if not self.camera_ink:
-                hint = sprites.sign("Hold the left button to draw wood from bank to bank.  More wood = weaker pieces.  Right click when done.", max(12, round(20 * unit)))
+                hint = sprites.sign("Hold the left button to draw wood from bank to bank.  More wood = a weaker dam.  Right click when done.", max(12, round(20 * unit)))
                 frame.blit(hint, hint.get_rect(center=(self.width / 2, self.height - 22 * unit)))
         if self.phase in ("attack", "rising"):
             gauge = pygame.Rect(0, 0, 150 * unit, 18 * unit)
