@@ -609,6 +609,12 @@ class Game:
         outlines = set()
         for shape in shapes:
             points = shape.contour.reshape(-1, 2)
+            # Restoring a dilated outline can extend beyond the camera canvas.
+            # Only actual image pixels have component labels; negative indices
+            # would otherwise silently sample the opposite edge.
+            inside = ((points[:, 0] >= 0) & (points[:, 0] < labels.shape[1]) &
+                      (points[:, 1] >= 0) & (points[:, 1] < labels.shape[0]))
+            points = points[inside]
             outlines.update(int(label) for label in labels[points[:, 1], points[:, 0]] if label)
         sticks = []
         for label in range(1, count):

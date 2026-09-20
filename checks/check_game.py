@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import pygame
 
-from beaver_battle.game import Game, Mine, Pickup, Prop, Rock, closed_shapes
+from beaver_battle.game import Game, Mine, Pickup, Prop, Rock, Shape, closed_shapes
 from beaver_battle.model import PlayerInput
 
 
@@ -354,3 +354,19 @@ print('Responsive heading check passed: reversals finish in one physics step')
 
 pygame.quit()
 print("Game checks passed: movement, ammo, lives, feedback, rounds, live walls, closed-shape fills, every weapon and hazard, rendering")
+
+# Restored shape contours may extend one pixel beyond any image edge.
+edge_game = arena()
+edge_ink = np.zeros((720, 1280), dtype=bool)
+edge_ink[100:104, 1180:1280] = True
+outside = np.array([[1280, 100], [-1, 100], [500, -1], [500, 720]], dtype=np.int32).reshape(-1, 1, 2)
+edge_shape = Shape('rock', outside, (640, 360), 0, 1)
+sticks, loose = edge_game.find_sticks(edge_ink, [edge_shape])
+assert len(sticks) == 1, 'Off-board negative points must not label ink on the opposite edge'
+assert np.array_equal(loose, edge_ink)
+for left, top, right, bottom in ((0, 200, 150, 350), (1129, 200, 1279, 350),
+                                  (500, 0, 650, 150), (500, 569, 650, 719)):
+    board = np.zeros((720, 1280), np.uint8)
+    cv2.rectangle(board, (left, top), (right, bottom), 1, 3)
+    edge_game.update(1 / 60, {}, board.astype(bool))
+print('Live geometry accepts contours beyond all four camera edges without wrapping or crashing')
