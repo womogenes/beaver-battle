@@ -1,5 +1,6 @@
 """Run from the repository root: .venv/bin/python -m checks.check_vision."""
 
+import math
 from dataclasses import FrozenInstanceError, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -281,6 +282,46 @@ def check_candidates():
     assert np.allclose(sorted(candidates), [(85, 130), (305, 170)], atol=1)
 
 
+def check_laser_on_a_whiteboard():
+    """The dot as the camera actually sees it on a lit whiteboard, not as one imagines it.
+
+    Measured on the bench: the board is neutral, redness never above 8, while the dot
+    drives red to 253 and reaches redness 29 to 58. It cannot do better, because how far
+    red can rise above the other channels is set by how bright the surface already is.
+    A threshold of 60 therefore found nothing at all.
+    """
+    board = np.full((480, 640, 3), 162, np.uint8)
+    board[:, :, 0] = 168                                   # a faintly cool white, redness -6
+    assert not laser_candidates(board, np.eye(3), 640, 480), "A bare board carries no dot"
+
+    lit = board.copy()
+    cv2.circle(lit, (300, 240), 4, (150, 150, 253), -1)
+    cv2.circle(lit, (300, 240), 2, (170, 170, 255), -1)
+    spots = laser_candidates(lit, np.eye(3), 640, 480)
+    assert len(spots) == 1, f"The dot must be found exactly once, got {len(spots)}"
+    assert math.dist(spots[0], (300, 240)) < 4
+
+    # The weakest dot measured on the bench still has to register.
+    faint = board.copy()
+    cv2.circle(faint, (200, 300), 3, (168, 168, 197), -1)  # redness 29, the measured floor
+    assert laser_candidates(faint, np.eye(3), 640, 480), "The faintest measured dot must register"
+    assert not laser_candidates(faint, np.eye(3), 640, 480, redness_min=60), \
+        "The old threshold is what missed it"
+
+    # One dot arrives in pieces, and pieces a few pixels apart read as an unusable merge.
+    split = board.copy()
+    for at in ((400, 200), (406, 203), (398, 208)):
+        cv2.circle(split, at, 2, (150, 150, 250), -1)
+    assert len(laser_candidates(split, np.eye(3), 640, 480, merge=0)) > 1
+    joined = laser_candidates(split, np.eye(3), 640, 480)
+    assert len(joined) == 1, f"Pieces of one dot must join, got {len(joined)}"
+
+    # Anything that merely looks warm is not a dot.
+    warm = board.copy()
+    cv2.rectangle(warm, (50, 50), (120, 120), (150, 158, 178), -1)   # redness 20
+    assert not laser_candidates(warm, np.eye(3), 640, 480), "A warm patch is not a laser"
+
+
 def check_identity():
     tracker = LaserTracker()
     assert tracker.update([(100, 100)], 1.0)[0] == {}, "Position alone cannot create identity"
@@ -535,10 +576,11 @@ check_projection_handover()
 check_marker_memory()
 check_backend()
 check_candidates()
+check_laser_on_a_whiteboard()
 check_identity()
 check_walls()
 check_pipeline()
 check_cancel_calibration()
 check_worker()
-print("Vision checks passed: calibration/cancellation/guidance, drawn ink by pen colour, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
+print("Vision checks passed: calibration/cancellation/guidance, laser dot on a whiteboard, drawn ink by pen colour, board scan, live obstacles, multi-frame markers, host capture backend, laser identity/overlap, "
       "walls, immutable/stale snapshots, capture backlog/reconnect/release")

@@ -194,6 +194,45 @@ static void laser_button_test(void)
 }
 #endif
 
+#ifdef CONFIG_BB_LASER_IDENTITY_TEST
+static void laser_identity_test(void)
+{
+    Button fire = {0};
+    Button special = {0};
+    bool laser = false;
+    uint64_t pressed_at = 0;
+    uint64_t next_status_ms = 0;
+    TickType_t wake_tick = xTaskGetTickCount();
+    ESP_LOGI(log_tag, "LASER IDENTITY TEST: controller %d, %" PRIu32 " ms period, %d ms gap; hold GPIO%d to fire; no Wi-Fi",
+             CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
+             laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID), FIRE_GPIO);
+    ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
+    while (true) {
+        uint64_t now = time_ms();
+        /* Nothing lights the laser but a held button, at power-up or ever. */
+        if (buttons_read(&fire, &special, now) && fire.pressed) {
+            pressed_at = now;   /* the pattern starts where the press does */
+        }
+        uint32_t gap = CONFIG_BB_LASER_IDENTITY_GAP_MS > 0
+            ? (uint32_t)CONFIG_BB_LASER_IDENTITY_GAP_MS
+            : laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID);
+        bool requested = fire.pressed &&
+            laser_identity_level(CONFIG_BB_CONTROLLER_ID, gap, now - pressed_at);
+        if (requested != laser) {
+            output_update(requested, false);
+            laser = requested;
+        }
+        if (now >= next_status_ms) {
+            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %" PRIu32 " ms, FIRE %s, laser %s",
+                     CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
+                     gap, fire.pressed ? "HELD" : "released", laser ? "ON" : "OFF");
+            next_status_ms = now + 2000;
+        }
+        vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));
+    }
+}
+#endif
+
 #ifdef CONFIG_BB_SERVO_BUTTON_TEST
 static void servo_button_test(void)
 {
@@ -332,6 +371,9 @@ void app_main(void)
 #endif
 #ifdef CONFIG_BB_SERVO_BUTTON_TEST
     servo_button_test();
+#endif
+#ifdef CONFIG_BB_LASER_IDENTITY_TEST
+    laser_identity_test();
 #endif
     esp_err_t nvs_result = nvs_flash_init();
     if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {

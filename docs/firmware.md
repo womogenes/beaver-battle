@@ -204,4 +204,51 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
-latency, power, and mechanical return still require the bench checks above.
+## Identity blink bench test
+
+`BB_LASER_IDENTITY_TEST` drives the laser continuously with this controller's identity
+pattern and nothing else: no buttons, no Wi-Fi, servo disabled. The laser is lit except
+for one gap of `BB_LASER_IDENTITY_GAP_MS` at the start of each period, and the period is
+600, 800 or 1000 ms for controller 1, 2 or 3. Those are in the ratio 3:4:5 so that no
+period is a harmonic of another.
+
+The camera identifies a controller from how often the gap comes round, never from how
+much of the time the laser is lit. A frame where tracking simply missed the dot looks
+exactly like a gap, so any measure of duty is confounded by dropouts, while random
+dropouts leave the period where it is and only lower the confidence in it.
+
+Measured on the bench with a flashed controller held on the board for 16 seconds, at
+30 fps: the dark runs came back at a median of exactly 133 ms, the programmed gap, and
+autocorrelation recovered the period as exactly 600 ms. Correlation at controller 1's own
+period was +0.70 against -0.21 and -0.18 at the other two candidates, so the right answer
+is strongly positive while the wrong ones are negative rather than merely smaller.
+
+Identifying the controller from a sliding window of that capture: 92 percent right from
+one second, 97 from one and a half, 100 percent from three seconds with the winning
+period beating the runner-up by 0.68. That is better than the simulation predicted.
+
+The dot was seen on 72 percent of frames, against a programmed duty of 78, so a few
+frames were lost beyond the gaps themselves and the lit runs came back at 333 ms rather
+than 467. Identification was unaffected, which is the whole reason for keying on period
+rather than duty: dropouts lower the correlation peak without moving it.
+
+The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
+`BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
+longest period the smallest share and therefore the least signal to correlate: simulated at
+the dropout rate measured on the bench, a fixed 133 ms identified controller 3 correctly on
+88 percent of three second windows where controller 1 managed 100. Holding the share
+constant brings all three to 99 or 100 with equal margins, at no extra cost to controller 1,
+whose gap is unchanged.
+
+Three sketches, one per controller, live under `firmware/arduino/`. They differ in the
+controller number and nothing else, which `checks.check_blink` enforces alongside comparing
+all three against the compiled firmware functions.
+
+The original 133 ms was four frames at 30 fps. Simulating the measured tracking reliability,
+four frames identified the right controller from a three second window on 99 percent of
+trials while the dot was held steady, against 90 percent for a three frame gap; at the 44
+percent detection measured while sweeping the dot quickly, neither is dependable at any
+window length, so identity should be taken while a player is reasonably still and then
+carried by ordinary motion tracking.
+
+## Checks

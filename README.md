@@ -72,6 +72,7 @@ reload_seconds = 2.5
 ```sh
 uv run python -m checks.check_game
 uv run python -m checks.check_shapes
+uv run python -m checks.check_blink
 uv run python -m checks.check_vision
 uv run python -m checks.check_network
 uv run python -m checks.check_app
