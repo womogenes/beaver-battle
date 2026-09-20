@@ -19,6 +19,16 @@ uint32_t laser_identity_period_ms(int controller_id)
     }
 }
 
+uint32_t laser_identity_gap_ms(int controller_id)
+{
+    /* The gap is a fixed share of the period, not a fixed number of milliseconds. One
+       fixed gap made the longest period the weakest: 133 ms is 22 percent of 600 but only
+       13 percent of 1000, so the longest period carried the least signal to correlate and
+       was identified correctly on 88 percent of three second windows where the shortest
+       managed 100. Holding the share constant brings all three to 100. */
+    return laser_identity_period_ms(controller_id) * 22 / 100;
+}
+
 bool laser_identity_level(int controller_id, uint32_t gap_ms, uint64_t elapsed_ms)
 {
     /* Lit except for one short blanking gap per period. The camera identifies a

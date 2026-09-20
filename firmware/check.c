@@ -37,6 +37,23 @@ int main(void)
         assert(dark == 133);
         assert(dark * 100 / (int)period <= 23);
     }
+    /* The gap holds a constant share of the period, so no controller carries less
+       signal than another. */
+    assert(laser_identity_gap_ms(1) == 132);
+    assert(laser_identity_gap_ms(2) == 176);
+    assert(laser_identity_gap_ms(3) == 220);
+    for (int id = 1; id <= 3; id++) {
+        uint32_t period = laser_identity_period_ms(id);
+        uint32_t gap = laser_identity_gap_ms(id);
+        int dark = 0;
+        for (uint32_t ms = 0; ms < period; ms++) {
+            if (!laser_identity_level(id, gap, ms)) {
+                dark++;
+            }
+        }
+        assert(dark * 100 / (int)period == 22);
+    }
+
     /* A zero or oversized gap leaves the laser simply on, never dark. */
     assert(laser_identity_level(1, 0, 0));
     assert(laser_identity_level(1, 600, 0));

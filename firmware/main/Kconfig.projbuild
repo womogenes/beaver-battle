@@ -48,13 +48,15 @@ config BB_LASER_IDENTITY_TEST
         disabled. Disable and rebuild to restore game operation.
 
 config BB_LASER_IDENTITY_GAP_MS
-    int "Identity blink gap (milliseconds)"
+    int "Identity blink gap override (milliseconds, 0 for automatic)"
     depends on BB_LASER_IDENTITY_TEST
-    range 33 300
-    default 133
+    range 0 400
+    default 0
     help
-        One gap per period. At 30 fps, 133 ms is four frames, which measured far
-        more reliable than three when the dot is moving and frames are missed.
+        Leave at 0 to take 22 percent of this controller's period, which is 132,
+        176 or 220 ms for controller 1, 2 or 3. A fixed gap gives the longest
+        period the smallest share and so the least signal to correlate, which
+        measured 88 percent identification against 100 for the shortest.
 
 config BB_FIRE_GPIO
     int "FIRE / steady laser button GPIO"

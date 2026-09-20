@@ -186,7 +186,7 @@ static void laser_identity_test(void)
     TickType_t wake_tick = xTaskGetTickCount();
     ESP_LOGI(log_tag, "LASER IDENTITY TEST: controller %d, %" PRIu32 " ms period, %d ms gap; hold GPIO%d to fire; no Wi-Fi",
              CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
-             CONFIG_BB_LASER_IDENTITY_GAP_MS, FIRE_GPIO);
+             laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID), FIRE_GPIO);
     ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
     while (true) {
         uint64_t now = time_ms();
@@ -194,18 +194,19 @@ static void laser_identity_test(void)
         if (buttons_read(&fire, &special, now) && fire.pressed) {
             pressed_at = now;   /* the pattern starts where the press does */
         }
+        uint32_t gap = CONFIG_BB_LASER_IDENTITY_GAP_MS > 0
+            ? (uint32_t)CONFIG_BB_LASER_IDENTITY_GAP_MS
+            : laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID);
         bool requested = fire.pressed &&
-            laser_identity_level(CONFIG_BB_CONTROLLER_ID, CONFIG_BB_LASER_IDENTITY_GAP_MS,
-                                 now - pressed_at);
+            laser_identity_level(CONFIG_BB_CONTROLLER_ID, gap, now - pressed_at);
         if (requested != laser) {
             output_update(requested, false);
             laser = requested;
         }
         if (now >= next_status_ms) {
-            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %d ms, FIRE %s, laser %s",
+            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %" PRIu32 " ms, FIRE %s, laser %s",
                      CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
-                     CONFIG_BB_LASER_IDENTITY_GAP_MS, fire.pressed ? "HELD" : "released",
-                     laser ? "ON" : "OFF");
+                     gap, fire.pressed ? "HELD" : "released", laser ? "ON" : "OFF");
             next_status_ms = now + 2000;
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));

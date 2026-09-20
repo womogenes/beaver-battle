@@ -11,10 +11,10 @@
 // Board: "ESP32 Dev Module". No Wi-Fi, no servo. The full game firmware is ESP-IDF and
 // does not build under Arduino; this sketch exists only to put the blink on a board.
 
-const int CONTROLLER_ID = 1;      // 1, 2 or 3, unique per controller
+const int CONTROLLER_ID = 2;      // 1, 2 or 3, unique per controller
 const int LASER_GPIO = 25;        // gate of the laser MOSFET, as in the ESP-IDF firmware
 const int FIRE_GPIO = 27;         // CONFIG_BB_FIRE_GPIO; switch connects the pin to GND
-const uint32_t GAP_MS = 133;      // four frames at 30 fps
+// GAP_MS comes from identityGapMs() below; a fixed gap starves the longest period.
 const uint32_t DEBOUNCE_MS = 15;  // BUTTON_DEBOUNCE_MS in controller.h
 
 // 600, 800 and 1000 are in the ratio 3:4:5, so no period is a harmonic of another and a
@@ -31,6 +31,14 @@ uint32_t identityPeriodMs(int controllerId) {
 // often the gap comes round, never from how much of the time the laser is on: a frame
 // where tracking missed the dot looks exactly like a gap, so a duty measurement is
 // confounded by dropouts, while random dropouts leave the period where it is.
+// A constant share of the period, matching laser_identity_gap_ms() in controller.c. One
+// fixed gap made the longest period the weakest: 133 ms is 22 percent of 600 but only 13
+// percent of 1000, so the longest carried the least signal and was identified correctly on
+// 88 percent of three second windows where the shortest managed 100.
+uint32_t identityGapMs(int controllerId) {
+  return identityPeriodMs(controllerId) * 22 / 100;
+}
+
 bool identityLevel(int controllerId, uint32_t gapMs, uint32_t elapsedMs) {
   uint32_t period = identityPeriodMs(controllerId);
   if (gapMs == 0 || gapMs >= period) {
@@ -69,7 +77,7 @@ void setup() {
   digitalWrite(LASER_GPIO, LOW);      // dark at power-up, and until FIRE is held
   pinMode(FIRE_GPIO, INPUT_PULLUP);   // switch pulls the pin to GND when pressed
   Serial.printf("identity blink: controller %d, period %u ms, gap %u ms; hold GPIO%d to fire\n",
-                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), GAP_MS, FIRE_GPIO);
+                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), identityGapMs(CONTROLLER_ID), FIRE_GPIO);
 }
 
 void loop() {
@@ -77,7 +85,7 @@ void loop() {
   if (fire.update(digitalRead(FIRE_GPIO) == LOW, now) && fire.pressed) {
     pressedAt = now;   // the pattern starts where the press does, so its phase is known
   }
-  bool wanted = fire.pressed && identityLevel(CONTROLLER_ID, GAP_MS, now - pressedAt);
+  bool wanted = fire.pressed && identityLevel(CONTROLLER_ID, identityGapMs(CONTROLLER_ID), now - pressedAt);
   if (wanted != lit) {
     digitalWrite(LASER_GPIO, wanted ? HIGH : LOW);
     lit = wanted;

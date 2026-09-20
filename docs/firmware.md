@@ -226,7 +226,19 @@ frames were lost beyond the gaps themselves and the lit runs came back at 333 ms
 than 467. Identification was unaffected, which is the whole reason for keying on period
 rather than duty: dropouts lower the correlation peak without moving it.
 
-The 133 ms default is four frames at 30 fps. Simulating the measured tracking reliability,
+The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
+`BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
+longest period the smallest share and therefore the least signal to correlate: simulated at
+the dropout rate measured on the bench, a fixed 133 ms identified controller 3 correctly on
+88 percent of three second windows where controller 1 managed 100. Holding the share
+constant brings all three to 99 or 100 with equal margins, at no extra cost to controller 1,
+whose gap is unchanged.
+
+Three sketches, one per controller, live under `firmware/arduino/`. They differ in the
+controller number and nothing else, which `checks.check_blink` enforces alongside comparing
+all three against the compiled firmware functions.
+
+The original 133 ms was four frames at 30 fps. Simulating the measured tracking reliability,
 four frames identified the right controller from a three second window on 99 percent of
 trials while the dot was held steady, against 90 percent for a three frame gap; at the 44
 percent detection measured while sweeping the dot quickly, neither is dependable at any
