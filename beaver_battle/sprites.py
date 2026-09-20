@@ -706,20 +706,22 @@ def timber(length, width, zoom=1, seed=0):
     return pygame.transform.smoothscale(surface, (max(1, size[0] // SS), max(1, size[1] // SS)))
 
 
-BERRY = (132, 112, 214)
-BERRY_DARK = (96, 84, 176)
+BERRY = {"red": ((226, 72, 86), (160, 40, 58)), "blue": ((132, 112, 214), (96, 84, 176))}
 
 
-def berries(size, zoom=1):
-    """A sprig of blueberries: eat them for a burst of speed. (Blue, not red: the camera takes red for a laser.)"""
+def berries(size, zoom=1, color="red"):
+    """A sprig of berries: eat them for a burst of speed.
+
+    Red is what was asked for and reads best on grass, but the camera takes saturated red for a laser dot
+    (vision.py: red >= 160 and red - max(green, blue) >= 60). If berries confuse laser tracking on the real
+    board, set [treasure] berry_color = "blue".
+    """
+    fill, edge = BERRY[color]
     pen = Pen(44, 44, size * zoom / 14, zoom)
     pen.stroke([(-2, -15), (0, -8), (4, -14)], LEAF_DARK, 1.6, closed=False)
     pen.ellipse(LEAF, (8, -13), 7, 3.6, -.5, LEAF_DARK, 1.2)
     pen.ellipse(LEAF, (-8, -13), 6, 3.2, .6, LEAF_DARK, 1.2)
     for x, y, r in ((-7, 2, 8), (7, 1, 8.5), (0, 10, 8)):
-        pen.ellipse(BERRY, (x, y), r, outline=BERRY_DARK, width=1.4)
-        pen.ellipse(tint(BERRY, .55), (x - r * .35, y - r * .35), r * .3, outline=None)
-        for spoke in range(5):
-            angle = spoke * math.tau / 5 + .3
-            pen.line(BERRY_DARK, (x + r * .15 + 1.8 * math.cos(angle), y + r * .2 + 1.8 * math.sin(angle)), (x + r * .15, y + r * .2), .8)
+        pen.ellipse(fill, (x, y), r, outline=edge, width=1.4)
+        pen.ellipse(tint(fill, .6), (x - r * .35, y - r * .35), r * .3, outline=None)
     return pen.image()

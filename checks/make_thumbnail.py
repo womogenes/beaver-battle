@@ -44,7 +44,7 @@ def main():
     blue, yellow, purple = sprites.PLAYER_COLORS
     image = sprites.tiled_ground("water.jpg", WIDTH, HEIGHT, 640, lighten=.3)
     # The meadow of Treasure Dash comes in on a slant from the right.
-    meadow = sprites.tiled_ground("grass.jpg", WIDTH, HEIGHT, 420, lighten=.08)
+    meadow = sprites.tiled_ground("grass.jpg", WIDTH, HEIGHT, WIDTH, lighten=.3)
     mask = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     shore = [(760, 0), (WIDTH, 0), (WIDTH, HEIGHT), (610, HEIGHT)]
     pygame.draw.polygon(mask, (255, 255, 255, 255), shore)

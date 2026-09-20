@@ -291,7 +291,7 @@ def main():
             pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 10, 20 if picked else 10), border_radius=40)
             pygame.draw.rect(screen, sprites.WHITE, card, border_radius=34)
             scene = pygame.Rect(card.x + 22, card.y + 22, card.width - 44, 210)
-            view = sprites.tiled_ground(ground, scene.width, scene.height, 300, lighten=.35 if index == 0 else .1)
+            view = sprites.tiled_ground(ground, scene.width, scene.height, 300 if index == 0 else 900, lighten=.35)
             if index == 0:
                 for place, color, turn in (((120, 110), sprites.PLAYER_COLORS[0], 20), ((330, 95), sprites.PLAYER_COLORS[1], 165)):
                     boat = pygame.transform.rotozoom(sprites.canoe(18, color, 1.5), -turn, 1)

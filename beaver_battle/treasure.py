@@ -48,7 +48,7 @@ SOLO_BOARDS = [
      "ponds": [(.50, .08, .07, .14), (.47, .26, .085, .16), (.52, .46, .095, .17), (.48, .66, .09, .17), (.53, .86, .08, .17),
                (.28, .86, .11, .10), (.38, .90, .09, .08), (.74, .14, .10, .09)],
      "portals": [((.30, .20), (.70, .88))]},
-    {"name": "DEER PARK", "whole": True, "deer": 6, "boosts": 5,
+    {"name": "DEER PARK", "whole": True, "deer": 6, "boosts": 3,
      "rocks": [(.22, .30, .035), (.30, .74, .035), (.52, .16, .04), (.70, .76, .035), (.80, .32, .035)],
      "ponds": [(.50, .52, .15, .21), (.40, .40, .10, .14), (.60, .66, .11, .15), (.50, .80, .07, .13), (.50, .95, .06, .10),
                (.30, .30, .07, .08), (.72, .50, .08, .07)]},
@@ -315,8 +315,9 @@ class Treasure:
         for index in range(self.board.get("boosts", self.setting("boost_clusters", 2)) * half):
             point, angle = spot(30 * unit), rng.uniform(0, math.tau)
             if point is not None:
-                for step in (-1, 0, 1):
-                    token = point + pygame.Vector2(math.cos(angle), math.sin(angle)) * step * 30 * unit
+                count = self.setting("berries_per_cluster", 1)
+                for step in range(count):
+                    token = point + pygame.Vector2(math.cos(angle), math.sin(angle)) * (step - (count - 1) / 2) * 30 * unit
                     self.boosts += [[twin, True] for twin in twins(token)]
         for index in range(self.board.get("deer", self.setting("deer", 2))):
             point = spot(30 * unit, everywhere=True, dry=True)
@@ -680,7 +681,8 @@ class Treasure:
     def ground(self):
         """Grass everywhere, the water wallpaper inside the ponds with a bank around them, and the rocks."""
         unit = self.scale
-        surface = sprites.tiled_ground("grass.jpg", self.width, self.height, round(330 * unit), lighten=.12)
+        # The daisy meadow, shown whole rather than tiled, and washed toward white for a lighter green.
+        surface = sprites.tiled_ground("grass.jpg", self.width, self.height, self.width, lighten=self.setting("grass_wash", .35))
         pond = sprites.tiled_ground("water.jpg", self.width, self.height, round(620 * unit), lighten=.18)
         mask = self.water.astype(np.uint8) * 255
         bank = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (round(18 * unit) | 1, round(18 * unit) | 1)))
@@ -723,7 +725,7 @@ class Treasure:
                     angle = self.clock * 3.2 + spoke * math.tau / 3
                     pygame.draw.circle(frame, sprites.INK, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 5 * unit)
                     pygame.draw.circle(frame, sprites.WHITE, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 3 * unit)
-        token = self.sprite(("token",), lambda: sprites.berries(17 * unit))
+        token = self.sprite(("token",), lambda: sprites.berries(17 * unit, color=self.setting("berry_color", "red")))
         for index, (place, alive) in enumerate(self.boosts):
             if alive:
                 frame.blit(token, token.get_rect(center=place + pygame.Vector2(0, 3 * unit * math.sin(self.clock * 5 + index))))
