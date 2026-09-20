@@ -490,3 +490,20 @@ controller 2; its log showed 570 µs followed 500 ms later by 990 µs. The recei
 reported zero dropped packets and send failures. This verifies radio delivery and
 firmware PWM targets, not measured shaft travel or water dispensing. Controller 1
 radio input was observed after flashing; its physical squeeze remains to be observed.
+
+## Reduced-load squeeze trial
+
+The ESP-NOW game profile now uses 75% of calibrated travel: 990 → 675 → 990 µs
+for the current mechanisms. It advances at most 10 µs every 20 ms, holds the
+squeeze for 100 ms, and returns at the same rate. Late loop ticks do not make
+larger catch-up jumps. PWM is disabled at boot and after the return settles,
+so there is no commanded idle holding torque. The original endpoint-calibration
+bench sequence is unchanged. These settings supersede the full-travel 500 ms
+phase profile above; actual dispensing and brownout prevention need a loaded test.
+
+Beaver Battle freezes combat during a missing controller's three-second reconnect
+grace period, then resumes automatically if it returns. It still clears stale
+inputs immediately, never substitutes mouse controls during a live match, and
+opens the disconnect pause screen if the outage persists. Camera failure still
+pauses immediately. Software cannot guarantee that an undersized supply will
+stop browning out.

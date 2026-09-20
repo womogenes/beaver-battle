@@ -140,12 +140,37 @@ def unhealthy_resume(run, state):
         run.checkpoint = run.game.update.call_count
         run.stage = 3
     elif run.stage == 3:
+        if run.fault == 'disconnected' and state['mode'] == 'game':
+            assert run.game.update.call_count == run.checkpoint
+            assert not state['args'].simulate
+            return []
         assert state['mode'] == 'pause'
         run.buttons[1] = (False, True)
         run.stage = 4
     elif run.stage == 4:
         assert state['mode'] == 'pause', f'{run.fault} Resume entered game'
         assert run.game.update.call_count == run.checkpoint, f'{run.fault} Resume advanced physics'
+        run.done = True
+
+
+def brief_reboot(run, state):
+    if run.stage < 2:
+        run.stage += 1
+        return [key(pygame.K_RETURN)]
+    if run.stage == 2 and state['mode'] == 'game':
+        run.active = [] if run.fault == 'all' else [1]
+        run.checkpoint = run.game.update.call_count
+        run.reconnect_at = run.now + 1.5
+        run.stage = 3
+    elif run.stage == 3:
+        assert state['mode'] == 'game' and not state['args'].simulate
+        assert run.game.update.call_count == run.checkpoint
+        if run.now >= run.reconnect_at:
+            run.active = [1, 2]
+            run.stage = 4
+    elif run.stage == 4:
+        assert state['mode'] == 'game'
+        assert run.game.update.call_count > run.checkpoint
         run.done = True
 
 
@@ -217,6 +242,8 @@ def main():
     for index, (mode, elapsed) in enumerate(result.history):
         if mode == 'countdown':
             assert result.history[index + 1][1] - elapsed >= 3 - 1e-8
+    for fault in ('one', 'all'):
+        Scenario(brief_reboot, fault).run()
     for fault in ('disconnected', 'stale'):
         Scenario(unhealthy_resume, fault).run()
     for method in ('keyboard', 'controller'):

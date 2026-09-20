@@ -125,7 +125,8 @@ in the pause menu too.
 
 Player hit feedback uses the bidirectional ESP-IDF receiver and controller firmware
 (see [firmware instructions](docs/firmware.md)). Each accepted damaging hit targets
-that player's D33 servo: 990 → 570 → 990 µs, with 500 ms at each stage. Both mechanisms
+that player's D33 servo. The reduced-load trial ramps 990 → 675 → 990 µs in
+10 µs steps every 20 ms, holds for 100 ms, then disables idle PWM. Both mechanisms
 use the user-confirmed endpoints. Repeated packets never repeat a squeeze; hits during
 a running cycle or its two-second cooldown are consumed without queuing. Buttons keep
 their normal laser/game functions. Older Arduino builds must be reflashed for feedback.

@@ -267,6 +267,7 @@ def main():
     ready = set()
     previous = {}
     both_since = None
+    disconnected_since = None
     countdown_until = 0.0
     projection_due = 0.0
     menu_message = ''
@@ -741,7 +742,7 @@ def main():
                 walls = snapshot.walls
                 inputs = bridge.inputs(snapshot, now)
                 bridge.send(now)
-                args.simulate = not active_ids
+                args.simulate = not active_ids and (args.simulate or mode not in ('game', 'pause', 'countdown', 'ready'))
                 if args.simulate:
                     # No laser controller is connected: the mouse steers player 1 and the keyboard works the
                     # menus, exactly as under --simulate, with practice walls if the camera has none to offer.
@@ -752,7 +753,7 @@ def main():
                     active_ids = ids
                     walls = walls if snapshot.calibrated and walls is not None else practice_walls
                 else:
-                    pointer = inputs.get(min(active_ids))
+                    pointer = inputs.get(min(active_ids, default=1))
                     if pointer is not None and pointer.aim is not None:
                         laser_at = (round(pointer.aim[0]), round(pointer.aim[1]))
                     if laser_at is not None and mode in ('home', 'players', 'maps', 'lobby', 'pause', 'scores', 'info'):
@@ -861,13 +862,20 @@ def main():
                 ids = active_ids
                 game.new_match(ids, walls)
                 mode, countdown_until, menu_message = 'countdown', elapsed + 3.0, ''
+            missing_controller = mode == 'game' and not args.simulate and not args.bench and any(
+                player_id not in active_ids for player_id in ids)
+            if missing_controller:
+                disconnected_since = now if disconnected_since is None else disconnected_since
+            else:
+                disconnected_since = None
             if mode == 'game' and not args.simulate:
-                if not args.bench and any(player_id not in active_ids for player_id in ids):
+                if missing_controller and now - disconnected_since >= 3.0:
                     mode, selection, status = 'pause', 0, 'Controller disconnected. Reconnect, then resume.'
                 elif now - snapshot.timestamp > config['camera']['stale_seconds'] or not snapshot.calibrated:
                     mode, selection, status = 'pause', 0, 'Camera tracking unavailable. Restore camera or calibrate.'
             if mode == 'game':
-                accumulator += dt
+                # Freeze combat during a brief reboot; discard elapsed time rather than catch up.
+                accumulator = 0 if missing_controller else accumulator + dt
                 while accumulator >= 1 / 60:
                     if game.held(1 / 60) is True:
                         accumulator -= 1 / 60

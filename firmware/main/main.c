@@ -86,6 +86,7 @@ static void output_init(void)
     ESP_ERROR_CHECK(ledc_channel_config(&laser_channel));
     if (servo_enabled()) {
         uint32_t initial_pulse_us = CONFIG_BB_SERVO_REST_US;
+        (void)initial_pulse_us;
 #ifdef CONFIG_BB_SERVO_BUTTON_TEST
         initial_pulse_us = 1500;
 #endif
@@ -102,7 +103,11 @@ static void output_init(void)
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .channel = LEDC_CHANNEL_1,
             .timer_sel = LEDC_TIMER_1,
+            #ifdef CONFIG_BB_ESPNOW_CONTROLLER
+            .duty = 0, /* No holding torque at boot or between game effects. */
+#else
             .duty = (uint32_t)((UINT64_C(65536) * initial_pulse_us) / 20000),
+#endif
         };
         ESP_ERROR_CHECK(ledc_channel_config(&servo_channel));
     }
@@ -456,7 +461,8 @@ static void espnow_controller_run(void)
     ServoSqueeze squeeze = {.pulse_us = CONFIG_BB_SERVO_REST_US};
     Button fire = {0}, special = {0};
     uint32_t boot = esp_random(), seq = 0, failed = 0;
-    uint32_t previous_pulse = CONFIG_BB_SERVO_REST_US;
+    uint32_t previous_pulse = 0;
+    uint64_t release_at = 0;
     uint64_t pressed_at = 0, last_send = 0, status_at = 0;
     bool previous_fire = false, previous_laser = false;
     TickType_t wake = xTaskGetTickCount();
@@ -479,6 +485,8 @@ static void espnow_controller_run(void)
                                            CONFIG_BB_SERVO_REST_US, CONFIG_BB_SERVO_PRESS_US)) changed = true;
         }
         uint32_t pulse = controller_squeeze_tick(&controller, &squeeze, now, CONFIG_BB_SERVO_REST_US);
+        if (controller.pressing) release_at = now + 200;
+        if (!controller.pressing && now >= release_at) pulse = 0;
         if (servo_enabled() && pulse != previous_pulse) {
             servo_pulse(pulse);
             previous_pulse = pulse;

@@ -166,7 +166,10 @@ bool controller_squeeze_command(Controller *controller, ServoSqueeze *squeeze,
     if (!controller_command(controller, command, now_ms, enabled)) return false;
     if (!was_pressing && controller->pressing) {
         if (servo_squeeze_start(squeeze, start_us, end_us, now_ms)) {
-            /* The squeeze helper owns phase deadlines, including late ticks. */
+            /* Gentler game profile: 75% travel, 10 us per 20 ms, 100 ms hold. */
+            squeeze->end_us = start_us > end_us ? start_us - (start_us - end_us) * 3 / 4 :
+                start_us + (end_us - start_us) * 3 / 4;
+            squeeze->next_ms = now_ms + 20;
             controller->press_until_ms = UINT64_MAX;
             controller->cooldown_until_ms = now_ms + 1500 + FEEDBACK_COOLDOWN_MS;
         } else controller->pressing = false;
@@ -183,7 +186,23 @@ uint32_t controller_squeeze_tick(Controller *controller, ServoSqueeze *squeeze,
         squeeze->pulse_us = rest_us;
         return rest_us;
     }
-    uint32_t pulse = servo_squeeze_tick(squeeze, now_ms);
+    if (squeeze->stage && now_ms >= squeeze->next_ms) {
+        if (squeeze->stage == 1 || squeeze->stage == 3) {
+            uint32_t target = squeeze->stage == 1 ? squeeze->end_us : squeeze->start_us;
+            squeeze->pulse_us = servo_jog(squeeze->pulse_us, target < squeeze->pulse_us,
+                target > squeeze->pulse_us, target < squeeze->pulse_us ? target : squeeze->pulse_us,
+                target > squeeze->pulse_us ? target : squeeze->pulse_us, 10);
+            squeeze->next_ms = now_ms + 20;
+            if (squeeze->pulse_us == target) {
+                squeeze->stage++;
+                squeeze->next_ms = now_ms + 100;
+            }
+        } else if (squeeze->stage == 2) {
+            squeeze->stage = 3;
+            squeeze->next_ms = now_ms + 20;
+        } else squeeze->stage = 0;
+    }
+    uint32_t pulse = squeeze->pulse_us;
     if (!squeeze->stage) {
         controller->pressing = false;
         controller->press_until_ms = now_ms;
