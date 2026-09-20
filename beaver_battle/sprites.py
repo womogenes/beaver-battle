@@ -49,6 +49,8 @@ STONE_DARK = (146, 153, 188)
 WATER_TOP = (208, 239, 240)
 WATER_BOTTOM = (180, 223, 240)
 WHITE = (255, 255, 255)
+BLUE = (44, 78, 178)  # Reading text: dark, saturated and un-red, so it survives a washed-out projector.
+BLUE_BRIGHT = (78, 138, 228)
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 art_cache = {}
@@ -99,6 +101,27 @@ def lettering(message, size, color, spacing=0):
         image.blit(glyph, (x, 0))
         x += glyph.get_width() + spacing
     return image
+
+
+def sign(message, size, color=BLUE):
+    """Reading text for a projector: solid dark-blue letters inside a white halo.
+
+    On a whiteboard dark-on-light is what survives room light; pale fills and thin outlines wash out.
+    """
+    key = ("sign", message, size, color)
+    if key not in art_cache:
+        if sum(1 for name in art_cache if name[0] == "sign") > 300:
+            for name in [name for name in art_cache if name[0] == "sign"]:
+                del art_cache[name]
+        spacing, reach = round(size * .03), max(2, round(size * .09))
+        face, glow = lettering(message, size, color, spacing), lettering(message, size, WHITE, spacing)
+        image = pygame.Surface((face.get_width() + 2 * reach, face.get_height() + 2 * reach), pygame.SRCALPHA)
+        for inner in range(reach, 0, -2):
+            for step in range(20):
+                image.blit(glow, (reach + inner * math.cos(step * math.tau / 20), reach + inner * math.sin(step * math.tau / 20)))
+        image.blit(face, (reach, reach))
+        art_cache[key] = image
+    return art_cache[key]
 
 
 def label(message, size, fill=WHITE, ink=INK, tilt=0):

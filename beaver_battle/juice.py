@@ -252,7 +252,7 @@ class Juice:
     def draw_ghosts(self, surface, portrait):
         """A sunk beaver is flung off the board, spinning and looming toward the audience."""
         for pos, velocity, age, span, player_id, way in self.ghosts:
-            image = pygame.transform.rotozoom(portrait(player_id), way * age * 1100, 1 + 1.6 * age / span)
+            image = pygame.transform.rotozoom(portrait(player_id, 2.6), way * age * 1100, (1 + 1.6 * age / span) / 2.6)
             surface.blit(image, image.get_rect(center=pos))
 
     def present(self, canvas, screen):
@@ -304,5 +304,5 @@ class Juice:
             if message == "DRAW!":
                 text = "NOBODY WINS THAT ONE"
             # Solid dark letters on the cream plate: white-on-cream was hard to read from across a room.
-            line = sprites.lettering(text, max(14, round((60 if match else 46) * unit)), sprites.INK)
+            line = sprites.lettering(text, max(14, round((60 if match else 46) * unit)), sprites.BLUE)
             surface.blit(line, line.get_rect(center=(game.width / 2, game.height * .44 + 140 * unit)))

@@ -1066,7 +1066,8 @@ class Game:
         self.mines = [mine for mine in self.mines if mine.active]
 
     def text(self, surface, message, position, size=20, color=None, centered=False, tilt=0):
-        image = sprites.label(str(message), max(12, round(size * self.scale)), color or sprites.WHITE, tilt=tilt)
+        size = max(12, round(size * self.scale))
+        image = sprites.label(str(message), size, color, tilt=tilt) if color else sprites.sign(str(message), size)
         surface.blit(image, image.get_rect(center=position) if centered else image.get_rect(topleft=position))
 
     def font(self, size):
@@ -1112,15 +1113,16 @@ class Game:
         """What the players typed at the start, or PLAYER N."""
         return (self.names.get(player_id) or f"PLAYER {player_id}") if player_id else "DRAW"
 
-    def portrait(self, player_id):
+    def portrait(self, player_id, zoom=1):
+        """Drawn at the size it will be shown: enlarging a small sprite is what made the beavers blurry."""
         color = COLORS[player_id - 1]
         def build():
-            ring, head = sprites.swimmer(10 * self.scale, color), sprites.tim(14.5 * self.scale, paws=False)
+            ring, head = sprites.swimmer(10 * self.scale, color, zoom), sprites.tim(14.5 * self.scale, zoom, paws=False)
             image = pygame.Surface(ring.get_size(), pygame.SRCALPHA)
             image.blit(ring, (0, 0))
             image.blit(head, head.get_rect(center=image.get_rect().center))
             return image
-        return self.sprite(("portrait", player_id), build)
+        return self.sprite(("portrait", player_id, zoom), build)
 
     def draw(self, surface):
         surface.fill(WATER)
@@ -1288,7 +1290,7 @@ class Game:
                 pygame.draw.circle(surface, INK, center, 9 * unit)
                 pygame.draw.circle(surface, color if point < self.scores[player.player_id] else sprites.WHITE, center, 6.5 * unit)
             if self.names.get(player.player_id):
-                self.text(surface, self.names[player.player_id], (x + (50 + (goal - 1) * 11) * unit, y + 27 * unit), 20, sprites.tint(color, .35), centered=True)
+                self.text(surface, self.names[player.player_id], (x + (50 + (goal - 1) * 11) * unit, y + 28 * unit), 22, centered=True)
             if player.powerup:
                 pop = juice.pops.get(player.player_id, 0)
                 slot = (x + 15 * unit, y + 34 * unit)
@@ -1300,7 +1302,7 @@ class Game:
             box = pygame.FRect(self.width * .15, self.height * .38, self.width * .7, self.height * .22)
             pygame.draw.rect(surface, sprites.CREAM, box, border_radius=max(1, round(22 * unit)))
             pygame.draw.rect(surface, INK, box, max(1, round(4 * unit)), border_radius=max(1, round(22 * unit)))
-            self.text(surface, self.error, (self.width / 2, self.height * .45), 44, sprites.BUTTER, centered=True)
+            self.text(surface, self.error, (self.width / 2, self.height * .45), 44, centered=True)
             self.text(surface, "Erase or move a physical obstacle", (self.width / 2, self.height * .55), 26, centered=True)
         elif self.phase != "playing":
             if juice.banner is None:

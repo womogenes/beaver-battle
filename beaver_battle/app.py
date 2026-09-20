@@ -210,11 +210,13 @@ def main():
     board = SoundBoard(sound.get('enabled', True) and not args.mute and not args.headless, sound.get('volume', .42), sound.get('music_volume', .75) if sound.get('music', True) else 0)
 
     def text_line(text, y, large=False, color=None):
-        from beaver_battle import sprites
+        # Everything the players read off the whiteboard is dark blue: it is what survives a projector.
         selected = text.startswith('> ')
-        fill = color or (sprites.PINK_DARK if large else sprites.BUTTER if selected else sprites.WHITE)
-        surface = sprites.label(text[2:] if selected else text, 76 if large else 38 if selected else 32, fill, tilt=2 if large else 0)
-        screen.blit(surface, ((width - surface.get_width()) // 2, y - (14 if large else 0)))
+        if large:
+            surface = sprites.label(text, 84, sprites.BLUE_BRIGHT, tilt=2)
+        else:
+            surface = sprites.sign(text, 44 if selected else 36, color or sprites.BLUE)
+        screen.blit(surface, ((width - surface.get_width()) // 2, y - (18 if large else 0)))
 
     try:
         if not args.simulate:
@@ -411,15 +413,21 @@ def main():
                 screen.fill((224, 239, 241))
                 text_line('BEAVER BATTLE', 80, True)
                 if mode == 'names':
-                    text_line("WHO'S PLAYING?", 200, color=sprites.BUTTER)
+                    text_line("WHO'S PLAYING?", 196)
                     for index, player_id in enumerate(ids):
-                        y = 290 + index * 95
-                        shown = typed + ('_' if int(elapsed * 2) % 2 else ' ') if index == naming else names.get(player_id, f'PLAYER {player_id}')
-                        face = pygame.transform.rotozoom(game.portrait(player_id), 0, 2.0 if index == naming else 1.5)
-                        line = sprites.label(shown if shown.strip() else ' ', 56 if index == naming else 38, sprites.PLAYER_COLORS[player_id - 1])
-                        left = (width - face.get_width() - 24 - line.get_width()) // 2
-                        screen.blit(face, (left, y + 28 - face.get_height() // 2))
-                        screen.blit(line, (left + face.get_width() + 24, y + 28 - line.get_height() // 2))
+                        y, active = 300 + index * 105, index == naming
+                        face = game.portrait(player_id, 2.4 if active else 1.7)
+                        if active:
+                            # What has been typed, a blinking bar, and a pale hint of what Enter alone would keep.
+                            line = sprites.sign(typed, 64) if typed else sprites.sign(names.get(player_id, f'PLAYER {player_id}'), 64, sprites.tint(sprites.BLUE, .62))
+                        else:
+                            line = sprites.sign(names.get(player_id, f'PLAYER {player_id}'), 44)
+                        left = (width - face.get_width() - 28 - line.get_width()) // 2
+                        screen.blit(face, (left, y - face.get_height() // 2))
+                        screen.blit(line, (left + face.get_width() + 28, y - line.get_height() // 2))
+                        if active and int(elapsed * 2) % 2:
+                            bar = left + face.get_width() + 28 + (line.get_width() + 6 if typed else 0)
+                            pygame.draw.rect(screen, sprites.BLUE, (bar, y - 30, 7, 60), border_radius=3)
                 elif mode == 'ready':
                     text_line('Press button 2 to ready', 180)
                     for index, player_id in enumerate(ids):
