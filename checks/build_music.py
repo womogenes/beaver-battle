@@ -1,8 +1,9 @@
-"""Mix two exported songs into the looping game theme: python checks/build_music.py SONG_A SONG_B
+"""Build the looping game theme: python checks/build_music.py SONG [SONG_B]
 
 Takes MP3, WAV, M4A or anything else soundfile or macOS afconvert can read, and writes
-assets/music/theme.ogg: song A, a crossfade into song B, and a crossfade from B's end back into
-A's start, so pygame can loop the file without a seam. Needs `pip install soundfile` (a build
+assets/music/theme.ogg. One song is assumed to be cut as a loop already and is only levelled and
+encoded, sample for sample. Two songs become a medley: A, a crossfade into B, and a crossfade from
+B's end back into A's start, so pygame can loop the file without a seam. Needs `pip install soundfile` (a build
 tool only; the game itself just plays the OGG).
 """
 
@@ -18,7 +19,7 @@ RATE = 44100
 OUT = Path(__file__).resolve().parents[1] / "assets" / "music" / "theme.ogg"
 
 
-def load(path):
+def load(path, trim=True):
     try:
         wave, rate = soundfile.read(path, dtype="float32", always_2d=True)
     except soundfile.LibsndfileError:
@@ -31,8 +32,9 @@ def load(path):
     if rate != RATE:
         steps = np.arange(0, len(wave), rate / RATE)
         wave = np.column_stack([np.interp(steps, np.arange(len(wave)), wave[:, side]) for side in (0, 1)]).astype(np.float32)
-    loud = np.abs(wave).max(axis=1) > .01
-    wave = wave[np.argmax(loud):len(loud) - np.argmax(loud[::-1])]
+    if trim:
+        loud = np.abs(wave).max(axis=1) > .01
+        wave = wave[np.argmax(loud):len(loud) - np.argmax(loud[::-1])]
     return wave[:, :2] * (.12 / max(1e-9, np.sqrt(np.mean(wave ** 2))))
 
 
@@ -54,9 +56,16 @@ def theme(first, second, seconds=4.0):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    mixed = theme(load(sys.argv[1]), load(sys.argv[2]))
-    soundfile.write(OUT, mixed, RATE, format="OGG", subtype="VORBIS")
+    if len(sys.argv) == 3:
+        mixed = theme(load(sys.argv[1]), load(sys.argv[2]))
+    else:
+        mixed = load(sys.argv[1], trim=False)
+        mixed = mixed / max(1, np.abs(mixed).max() / .95)
+    with soundfile.SoundFile(OUT, "w", RATE, 2, format="OGG", subtype="VORBIS") as output:
+        # libsndfile's Vorbis encoder overflows its stack on one huge buffer; feed it a second at a time.
+        for start in range(0, len(mixed), RATE):
+            output.write(mixed[start:start + RATE])
     print(f"{OUT} written: {len(mixed) / RATE:.0f} s, {OUT.stat().st_size / 1e6:.1f} MB")
