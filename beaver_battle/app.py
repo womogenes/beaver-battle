@@ -184,7 +184,7 @@ def main():
     # Names are typed on the laptop before a match; unattended runs skip the question.
     ask_names = not (args.headless or args.bench or args.seconds or args.no_names)
     names, naming, typed = {}, 0, ''
-    info_return = 'lobby'
+    info_return, info_frame = 'lobby', 0
     pause_button = pygame.Rect(width - 58, 12, 40, 40)
     info_button = pygame.Rect(width - 108, 12, 40, 40)
     again_button = pygame.Rect(0, 0, 300, 66)
@@ -404,7 +404,7 @@ def main():
                             mode = 'calibration'
                             vision.begin_calibration()
                     elif choice == 'How to play':
-                        mode, info_return = 'info', mode
+                        mode, info_return, info_frame = 'info', mode, frame_count
                     elif choice == 'Resume':
                         mode, status = 'game', ''
                     elif choice == 'New match':
@@ -491,7 +491,8 @@ def main():
                 text_line(snapshot.error or 'Keep all four markers in view', height // 2 + 60)
                 text_line('Keep ink and hands out of the four corners. Hold both buttons to cancel.', height // 2 + 96)
             elif mode == 'info':
-                if cycle or confirm:
+                # The press that opened this page must not also be the press that closes it.
+                if (cycle or confirm) and frame_count > info_frame:
                     mode = info_return
                 draw_info()
             elif mode in ('game', 'countdown'):
