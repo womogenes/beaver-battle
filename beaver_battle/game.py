@@ -35,7 +35,7 @@ class Player:
     special_held: bool = False
     joust: float = 0.0
     bounce: float = 0.0
-    bounce_heading: float = 0.0
+    wall: pygame.Vector2 = field(default_factory=pygame.Vector2)
     knock: pygame.Vector2 = field(default_factory=pygame.Vector2)
 
 
@@ -839,15 +839,28 @@ class Game:
                 if player.reload == 0:
                     player.ammo = self.setting("magazine", 3)
                     self.sounds.append("reload")
-            if player.bounce > 0:
-                player.bounce = countdown(player.bounce, dt)
-                player.heading = turn_toward(player.heading, player.bounce_heading, math.radians(720) * dt)
-            elif control.connected and control.aim is not None and control.aim_age <= self.config.get("camera", {}).get("stale_seconds", .5):
+            player.bounce = countdown(player.bounce, dt)
+            wish, rate = player.heading, math.radians(self.setting("turn_speed", 240))
+            if control.connected and control.aim is not None and control.aim_age <= self.config.get("camera", {}).get("stale_seconds", .5):
                 if all(math.isfinite(value) for value in control.aim):
                     delta = pygame.Vector2(control.aim) - player.pos
                     if delta.length() > self.setting("aim_deadzone", 24) * self.scale:
-                        player.heading = turn_toward(player.heading, math.atan2(delta.y, delta.x),
-                                                     math.radians(self.setting("turn_speed", 240)) * dt)
+                        wish = math.atan2(delta.y, delta.x)
+            if player.wall.length_squared():
+                # Touching something: never steer into it. Hug it and slide along, instead of
+                # rebounding, swinging back and hitting it again for as long as the aim is beyond it.
+                want = direction(wish)
+                along = pygame.Vector2(*(0 if want[axis] * player.wall[axis] > 0 else want[axis] for axis in (0, 1)))
+                if along != want:
+                    if along.length() < .2 and not (player.wall.x and player.wall.y):
+                        # Dead ahead into one face: keep going whichever way the bow already favours.
+                        ahead = direction(player.heading)
+                        along = pygame.Vector2(*(0 if player.wall[axis] else ahead[axis] for axis in (0, 1)))
+                        if along.length() < .05:
+                            along = pygame.Vector2(-player.wall.y, player.wall.x)
+                    # Wedged in a corner with nowhere to slide: hold still rather than thrash.
+                    wish, rate = (math.atan2(along.y, along.x), math.radians(720)) if along.length() >= .05 else (player.heading, 0)
+            player.heading = turn_toward(player.heading, wish, rate * dt)
             fire = control.fire and control.connected
             if player.state == "beaver":
                 target_speed = self.setting("beaver_boost_speed", 150) if fire else self.setting("beaver_speed", 75)
@@ -857,13 +870,21 @@ class Game:
                 player.speed = self.setting("canoe_speed", 240) * self.scale
             velocity = direction(player.heading) * player.speed * (1.5 if player.joust else 1)
             rebound = self.move(player, velocity, dt)
-            if rebound != velocity and rebound.length_squared():
-                if player.bounce == 0:
-                    self.sounds.append("bump")
-                    self.fx.append(("bump", player.pos + direction(player.heading) * player.radius))
-                # Glance off smoothly: slide along the obstacle while the bow swings round to the rebound heading.
-                player.bounce = .3
-                player.bounce_heading = math.atan2(rebound.y, rebound.x)
+            blocked = pygame.Vector2(*(math.copysign(1, velocity[axis]) if rebound[axis] != velocity[axis] and velocity[axis] else 0 for axis in (0, 1)))
+            # Only a real collision makes a noise, and not again while still leaning on the same edge.
+            if blocked.length_squared() and player.bounce == 0 and not player.wall.length_squared() and direction(player.heading).dot(blocked.normalize()) > .5:
+                self.sounds.append("bump")
+                self.fx.append(("bump", player.pos + blocked.normalize() * player.radius))
+            if blocked.length_squared():
+                player.bounce = .5
+            for axis in (0, 1):
+                # Sliding flush along a face no longer pushes into it, but the face is still there.
+                if not blocked[axis] and player.wall[axis]:
+                    probe = player.pos.copy()
+                    probe[axis] += player.wall[axis] * 2 * self.scale
+                    if not self.free(probe, player.radius, player):
+                        blocked[axis] = player.wall[axis]
+            player.wall = blocked
             if player.knock.length_squared() > 4:
                 player.knock = self.move(player, player.knock, dt) * .0009 ** dt
             if fire and player.state == "canoe" and player.reload == 0 and player.cooldown == 0:
