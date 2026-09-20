@@ -401,3 +401,21 @@ off limits rather than as something to be careful around.
 Boot mode `0x1f` on its own is not a fault. It prints as `SPI_FAST_FLASH_BOOT` exactly as
 the healthy `0x13` does; the difference is only floating pins once the wiring is off. The
 fault to look for is `invalid header: 0xffffffff`, which says the flash did not read back.
+
+## Where the receiver sits is a setup step, not a detail
+
+A replacement receiver measured 38.4 percent packet loss on controller 1 while sitting
+beside the laptop: the controller was sending 51.3 packets a second and only 31.6 were
+arriving. Moving it a few inches into the open took it to 771 of 771, zero loss, at 51.4 a
+second, with nothing else changed.
+
+Read that number from sequence gaps rather than from arrival rate alone, because the two
+failures look identical otherwise. The controller's own `seq` says how many it sent, so the
+gap between that span and the count received is loss in the air. The receiver's `dropped`
+counter stays at zero through this, which is what separates it from the serial backpressure
+problem above: that one drops frames inside the receiver, this one never gets them.
+
+Loss this high is survivable for buttons, since the protocol repeats state every 20 ms
+rather than sending edges once, but it removes the margin that keeps aiming responsive and
+gets worse with two controllers contending in a crowded room. Place the receiver away from
+the laptop before a match and confirm zero loss.
