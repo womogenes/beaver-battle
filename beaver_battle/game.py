@@ -329,10 +329,12 @@ def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
             if links[3] < 0:
                 continue
             area = cv2.contourArea(contour)
-            if not min_area <= area <= max_area:
+            # The hole was measured after the ink grew inward over it, so restore that
+            # before judging size. A small ring found at a large radius is otherwise
+            # rejected for being small when most of what was measured is the growth.
+            extent = math.sqrt(max(area, 0.0)) + 2 * radius
+            if not min_area <= extent ** 2 <= max_area:
                 continue
-            # The hole was measured after the ink grew inward, so add the growth back.
-            extent = math.sqrt(area) + 2 * radius
             if 2 * radius > closure * extent:
                 continue
             moments = cv2.moments(contour)
@@ -342,17 +344,27 @@ def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
             y = min(max(int(moments["m01"] / moments["m00"]), 0), ink.shape[0] - 1)
             if accepted[y, x]:
                 continue
-            center, (across, along), degrees = cv2.minAreaRect(contour)
+            outline = contour
+            if radius:
+                # The art must cover what is solid, so restore the growth on this outline
+                # too, not only on the mask. Cropped to its own corner of the board.
+                left, top, wide, tall = cv2.boundingRect(contour)
+                pad = radius + 2
+                patch = np.zeros((tall + 2 * pad, wide + 2 * pad), np.uint8)
+                cv2.drawContours(patch, [contour], -1, 1, -1, offset=(pad - left, pad - top))
+                span = 2 * radius + 1
+                patch = cv2.dilate(patch, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
+                grown, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if grown:
+                    outline = max(grown, key=cv2.contourArea) + np.int32([left - pad, top - pad])
+            center, (across, along), degrees = cv2.minAreaRect(outline)
             if across > along:
                 across, along, degrees = along, across, degrees - 90
             ratio = along / max(across, 1)
             # minAreaRect's angle belongs to its first side; the grain follows the long side.
-            shapes.append(Shape("log" if ratio >= 2 else "rock", contour, center,
+            shapes.append(Shape("log" if ratio >= 2 else "rock", outline, center,
                                 math.radians(degrees + 90) % math.pi, ratio))
-            cv2.drawContours(fresh, [contour], -1, 1, -1)
-        if radius and fresh.any():
-            span = 2 * radius + 1
-            fresh = cv2.dilate(fresh, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
+            cv2.drawContours(fresh, [outline], -1, 1, -1)
         # Only once a radius completes, so one pass can take concentric enclosures both.
         interior |= fresh
         accepted |= fresh
@@ -495,7 +507,7 @@ class Game:
             walls, shapes = closed_shapes(ink, round(self.setting("shape_gap", 5) * self.scale),
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,
-                                          self.setting("shape_closure", .45))
+                                          self.setting("shape_closure", .70))
         for shape in shapes:
             # Camera jitter must not flip a fill between log and rock or wobble its grain.
             for old in self.shapes:

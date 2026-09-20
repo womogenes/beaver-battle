@@ -169,8 +169,11 @@ hairline = drawing(rock_outline)
 hairline[298:301, 900:940] = False
 game.update(0, {}, hairline)
 assert [shape.kind for shape in game.shapes] == ["rock"] and not game.physical_free(pygame.Vector2(850, 300), 4)
+# Filling now tolerates a gap up to game.shape_closure of a shape's own width, so what
+# counts as erased is proportional too: a marker-width nick no longer reopens a fill, and
+# a doorway has to be a real one. That is the cost of bridging pen lifts and dry dashes.
 erased = drawing(rock_outline)
-erased[285:315, 900:940] = False
+erased[190:410, 850:940] = False
 game.update(0, {}, erased)
 assert not game.shapes and game.physical_free(pygame.Vector2(850, 300), 4)
 game.update(0, {}, drawing(rock_outline))

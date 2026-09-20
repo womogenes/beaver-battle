@@ -71,6 +71,20 @@ def circle_small_gapped():
     return arc(blank(), (300, 300), 32, 0, 360, gaps=[(40, 9)])
 
 
+def ring_bitten():
+    """A small ring with a bite out of it, the size drawn on the bench in green.
+
+    The gap is most of a radius, so nothing judging it in absolute pixels would call this
+    closed. Against the ring's own size it is still plainly a container.
+    """
+    return arc(blank(), (300, 300), 34, 0, 360, thickness=6, gaps=[(40, 40)])
+
+
+def ring_half_open():
+    """Half the ring gone. Whatever the tolerance, this is not a container."""
+    return arc(blank(), (300, 300), 90, 0, 180, thickness=4)
+
+
 def letter_c():
     """Genuinely open: about 140 pixels of the ring missing, most of a side."""
     return arc(blank(), (300, 300), 90, 60, 330)
@@ -195,6 +209,8 @@ CASES = [
     ("flowchart", flowchart, 2, "both boxes fill, the joining arrow does not"),
     ("venn", venn, 3, "two overlapping rings enclose three regions"),
     ("nested", nested, 2, "a box inside a circle gives two arenas"),
+    ("ring_bitten", ring_bitten, 1, "a bite out of a small ring still leaves a rock"),
+    ("ring_half_open", ring_half_open, 0, "half a ring encloses nothing at any tolerance"),
     ("letter_c", letter_c, 0, "a quarter open is a C, not a container"),
     ("swoosh", swoosh, 0, "an open curve must never flood the board"),
     ("axes_and_curve", axes_and_curve, 1, "the area under a curve that meets its axes is an island"),

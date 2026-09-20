@@ -17,7 +17,7 @@ from checks.board_shapes import CASES, HEIGHT, WIDTH, arc, blank
 
 MIN_AREA = 1200
 MAX_AREA = .25 * WIDTH * HEIGHT
-CLOSURE = .20
+CLOSURE = .70
 LINK = 40
 MEND = 180
 
