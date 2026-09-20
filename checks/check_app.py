@@ -41,6 +41,7 @@ class Scenario:
     posted: list = field(default_factory=list)
     missing_aim: bool = False
     press_edge: bool = False
+    aim: tuple = (640, 360)
 
     def tick(self, fps):
         self.now += .1
@@ -80,7 +81,7 @@ class Scenario:
         bridge = Mock()
         bridge.active_ids.side_effect = lambda now: self.active[:]
         bridge.inputs.side_effect = lambda snapshot, now: {
-            player: PlayerInput(player, None if self.missing_aim else (640, 360), *self.buttons.get(player, (False, False)), special_pressed=self.press_edge and player == 1)
+            player: PlayerInput(player, None if self.missing_aim else self.aim, *self.buttons.get(player, (False, False)), special_pressed=self.press_edge and player == 1)
             for player in self.active}
         with contextlib.ExitStack() as patches:
             for target, name, value in (
@@ -282,6 +283,8 @@ def main():
 
     for fault in ('brief', 'expired'):
         Scenario(laser_select_gap, fault).run()
+    border = Scenario(laser_select, aim=(712, 350)).run()
+    assert any(mode == 'info' for mode, elapsed in border.history), 'Visible outline must be clickable'
     selected = Scenario(laser_select).run()
     clicks = [event for event in selected.posted if event.type == pygame.MOUSEBUTTONDOWN]
     assert len(clicks) == 1 and clicks[0].pos == (640, 360), 'Player 2 clicks its hovered item once per press'

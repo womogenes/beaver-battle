@@ -655,7 +655,8 @@ def main():
                 if mode in ('lobby', 'pause') and event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
                     # The menu is a column of real buttons: pointing at one selects it, clicking chooses it.
                     for index, rect in enumerate(menu_rects):
-                        if rect.collidepoint(event.pos):
+                        # Include the visible four-pixel outline in the hit target.
+                        if rect.inflate(8, 8).collidepoint(event.pos):
                             selection = index
                             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                 key_confirm = True
