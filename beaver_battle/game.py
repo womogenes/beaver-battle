@@ -346,6 +346,16 @@ def link_strokes_patch(ink, reach, min_piece, thickness, record):
     return bridged.astype(bool)
 
 
+def interior_ink(walls):
+    """Ink disconnected from the projection boundary, for enclosure inference."""
+    count, labels = cv2.connectedComponents(walls.astype(np.uint8), connectivity=8)
+    boundary = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+    keep = np.ones(count, dtype=bool)
+    keep[boundary] = False
+    keep[0] = False
+    return keep[labels]
+
+
 def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
     """Find regions enclosed by ink. Returns (ink plus interiors, shapes).
 
@@ -368,7 +378,11 @@ def closed_shapes(walls, gap=5, min_area=400, max_area=math.inf, closure=0.25):
     Regions touching the board edge are open water, and enclosures above max_area stay
     hollow so an arena outline cannot turn the whole board solid.
     """
-    ink = walls.astype(np.uint8)
+    # The projection boundary can be detected as a broken rectangular stroke.
+    # Growing it closes gaps around unrelated drawings and invents enormous islands.
+    # Edge-connected ink is an open boundary, never evidence for a filled enclosure;
+    # retain the original walls below so this does not erase collision strokes.
+    ink = interior_ink(walls).astype(np.uint8)
     distance = cv2.distanceTransform((ink == 0).astype(np.uint8), cv2.DIST_L2, 3)
     interior = np.zeros_like(ink)
     accepted = np.zeros_like(ink)
@@ -571,7 +585,10 @@ class Game:
             # made of it, so repair the stroke before anything else reads the geometry.
             thickness = max(1, round(self.setting("stroke_width", 3) * self.scale))
             found = []
-            ink = link_strokes(walls, round(self.setting("stroke_link", 40) * self.scale),
+            # Do this before repair: a long bridge to the projection border can
+            # otherwise attach a legitimate closed drawing to that false boundary.
+            original = walls
+            ink = link_strokes(interior_ink(walls), round(self.setting("stroke_link", 40) * self.scale),
                                round(self.setting("stroke_min_piece", 40) * self.scale ** 2),
                                thickness, record=found)
             # Then carry any free end on, which reaches breaks that connectivity cannot see.
@@ -582,6 +599,8 @@ class Game:
                                           self.setting("shape_min_area", 1200) * self.scale ** 2,
                                           self.setting("shape_max_fraction", .25) * self.width * self.height,
                                           self.setting("shape_closure", .70))
+            walls = walls | original
+            ink = ink | original
         for shape in shapes:
             # Camera jitter must not flip a fill between log and rock or wobble its grain.
             for old in self.shapes:

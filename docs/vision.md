@@ -274,3 +274,14 @@ period, and three seconds of strict-majority ink voting. Scanning starts after
 both players ready and repeats on replay; no title, status text, or pointer rings
 are projected during it. Old in-flight wall jobs are rejected by generation.
 This avoids freezing menu artwork into the match's physical geometry.
+
+Camera diagnostics also save `match-ink.png` (the frozen input) and
+`match-solid.png` (the collision geometry). Compare these rather than assuming
+`walls.png`, the current live detection, is the mask used by a static match.
+
+Projection-edge fragments are excluded from stroke repair and enclosure inference,
+but their original collision pixels remain. A captured failure previously produced
+five filled shapes and 55.7% solid coverage; replay after this fix retained the three
+physical closed drawings at 6.2%. A fresh 14-second camera match showed no giant
+edge islands and completed 832 frames without a crash. Drawings connected directly
+to the projection boundary retain their strokes but are not inferred as solid fills.

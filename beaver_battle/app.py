@@ -1098,6 +1098,10 @@ def main():
                     cv2.imwrite(str(args.diagnostics_dir / 'camera.jpg'), snapshot.preview)
                 if snapshot.walls is not None:
                     cv2.imwrite(str(args.diagnostics_dir / 'walls.png'), snapshot.walls.astype(np.uint8) * 255)
+                if game.match_walls is not None:
+                    cv2.imwrite(str(args.diagnostics_dir / 'match-ink.png'), game.match_walls.astype(np.uint8) * 255)
+                if game.walls is not None:
+                    cv2.imwrite(str(args.diagnostics_dir / 'match-solid.png'), game.walls.astype(np.uint8) * 255)
                 diagnostic = dict(mode=mode, calibrated=snapshot.calibrated, error=snapshot.error,
                     controllers=active_ids, aims=dict(snapshot.aims),
                     confidence=dict(snapshot.confidence),
