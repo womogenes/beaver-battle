@@ -35,6 +35,26 @@ config BB_LASER_BUTTON_TEST
         on, 250 ms off). SPECIAL wins if both are held. Release both for off.
         Disable this option and rebuild to restore game operation.
 
+config BB_LASER_IDENTITY_TEST
+    bool "Laser identity blink bench test (no Wi-Fi, servo disabled)"
+    depends on !BB_LASER_BUTTON_TEST && !BB_SERVO_BUTTON_TEST
+    default n
+    help
+        Drive the laser continuously with this controller's identity blink: lit
+        except for one gap of BB_LASER_IDENTITY_GAP_MS at the start of every
+        period, where the period is 600, 800 or 1000 ms for controller 1, 2 or 3.
+        The camera identifies a controller from how often the gap comes round.
+        No buttons, no Wi-Fi. Disable and rebuild to restore game operation.
+
+config BB_LASER_IDENTITY_GAP_MS
+    int "Identity blink gap (milliseconds)"
+    depends on BB_LASER_IDENTITY_TEST
+    range 33 300
+    default 133
+    help
+        One gap per period. At 30 fps, 133 ms is four frames, which measured far
+        more reliable than three when the dot is moving and frames are missed.
+
 config BB_FIRE_GPIO
     int "FIRE / steady laser button GPIO"
     range 0 33
@@ -47,7 +67,7 @@ config BB_SPECIAL_GPIO
 
 config BB_SERVO_ENABLED
     bool "Enable calibrated servo output"
-    depends on !BB_LASER_BUTTON_TEST && !BB_SERVO_BUTTON_TEST
+    depends on !BB_LASER_BUTTON_TEST && !BB_SERVO_BUTTON_TEST && !BB_LASER_IDENTITY_TEST
     default n
     help
         Leave disabled until rest/press pulse widths and mechanical travel are
@@ -55,7 +75,7 @@ config BB_SERVO_ENABLED
 
 config BB_SERVO_BUTTON_TEST
     bool "Servo button bench test (no Wi-Fi, laser off)"
-    depends on !BB_LASER_BUTTON_TEST
+    depends on !BB_LASER_BUTTON_TEST && !BB_LASER_IDENTITY_TEST
     default n
     help
         Start at 1500 us. Hold FIRE to lower the pulse or SPECIAL to raise it.

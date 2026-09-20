@@ -13,6 +13,33 @@ int main(void)
     assert(!laser_bench_level(true, true, 499));
     assert(laser_bench_level(false, true, 500));
     assert(!laser_bench_level(false, false, 500));
+
+    /* Identity blink: lit except for one gap per period, unique period per controller. */
+    assert(laser_identity_period_ms(1) == 600);
+    assert(laser_identity_period_ms(2) == 800);
+    assert(laser_identity_period_ms(3) == 1000);
+    assert(laser_identity_period_ms(9) == 600);
+    for (int id = 1; id <= 3; id++) {
+        uint32_t period = laser_identity_period_ms(id);
+        assert(!laser_identity_level(id, 133, 0));
+        assert(!laser_identity_level(id, 133, 132));
+        assert(laser_identity_level(id, 133, 133));
+        assert(laser_identity_level(id, 133, period - 1));
+        assert(!laser_identity_level(id, 133, period));
+        assert(!laser_identity_level(id, 133, period * 5));
+        /* The gap is a small part of each period, so tracking barely suffers. */
+        int dark = 0;
+        for (uint32_t ms = 0; ms < period; ms++) {
+            if (!laser_identity_level(id, 133, ms)) {
+                dark++;
+            }
+        }
+        assert(dark == 133);
+        assert(dark * 100 / (int)period <= 23);
+    }
+    /* A zero or oversized gap leaves the laser simply on, never dark. */
+    assert(laser_identity_level(1, 0, 0));
+    assert(laser_identity_level(1, 600, 0));
     Button button = {0};
     assert(!button_update(&button, true, 0));
     assert(!button_update(&button, false, 3));

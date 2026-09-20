@@ -198,4 +198,24 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
-latency, power, and mechanical return still require the bench checks above.
+## Identity blink bench test
+
+`BB_LASER_IDENTITY_TEST` drives the laser continuously with this controller's identity
+pattern and nothing else: no buttons, no Wi-Fi, servo disabled. The laser is lit except
+for one gap of `BB_LASER_IDENTITY_GAP_MS` at the start of each period, and the period is
+600, 800 or 1000 ms for controller 1, 2 or 3. Those are in the ratio 3:4:5 so that no
+period is a harmonic of another.
+
+The camera identifies a controller from how often the gap comes round, never from how
+much of the time the laser is lit. A frame where tracking simply missed the dot looks
+exactly like a gap, so any measure of duty is confounded by dropouts, while random
+dropouts leave the period where it is and only lower the confidence in it.
+
+The 133 ms default is four frames at 30 fps. Simulating the measured tracking reliability,
+four frames identified the right controller from a three second window on 99 percent of
+trials while the dot was held steady, against 90 percent for a three frame gap; at the 44
+percent detection measured while sweeping the dot quickly, neither is dependable at any
+window length, so identity should be taken while a player is reasonably still and then
+carried by ordinary motion tracking.
+
+## Checks
