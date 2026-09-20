@@ -266,6 +266,7 @@ def main():
     selection = 0
     ready = set()
     previous = {}
+    menu_presses = {}
     both_since = None
     disconnected_since = None
     countdown_until = 0.0
@@ -771,11 +772,23 @@ def main():
                 for player_id in sorted(active_ids):
                     control = inputs.get(player_id)
                     was_special = previous.get(player_id, (False, False))[1]
-                    if control and control.connected and control.aim is not None and control.special and not was_special:
+                    if control and control.connected and (control.special_pressed or (control.special and not was_special)):
+                        menu_presses[player_id] = (mode, now + 0.3)
+                clicked = False
+                for player_id, (pressed_mode, deadline) in list(menu_presses.items()):
+                    control = inputs.get(player_id)
+                    if pressed_mode != mode or now > deadline or not control or not control.connected:
+                        del menu_presses[player_id]
+                    elif control.aim is not None:
+                        del menu_presses[player_id]
+                        if clicked:
+                            continue
                         position = tuple(round(value) for value in control.aim)
                         pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=position, rel=(0, 0), buttons=(0, 0, 0)))
                         pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=position, button=1, laser_mode=mode))
-                        break  # At most one menu action per frame.
+                        clicked = True
+            else:
+                menu_presses.clear()
             if mode in ('game', 'ready', 'countdown', 'calibration') and host_input.fire and host_input.special and not driven:
                 both_since = now if both_since is None else both_since
                 if now - both_since >= 1:

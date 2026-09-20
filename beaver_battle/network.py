@@ -23,6 +23,7 @@ class Controller:
     seq: int
     received: float
     buttons: int = 0
+    special_pressed: bool = False
     laser: bool = False
     command_seq: int = 0
     retired_boots: list = field(default_factory=list)
@@ -83,12 +84,15 @@ class ControllerBridge:
                 if current.boot != packet['boot']:
                     current.retired_boots = (current.retired_boots + [current.boot])[-8:]
                     current.boot = packet['boot']
+                    current.buttons = 0
+                    current.special_pressed = False
                     current.desired = None
                 current.endpoint = endpoint
             else:
                 current = Controller(player_id, endpoint, packet['boot'], packet['seq'], now)
                 self.controllers[player_id] = current
             current.seq = packet['seq']
+            current.special_pressed |= bool(packet['buttons'] & 2 and not current.buttons & 2)
             current.buttons = packet['buttons']
             current.command_seq = packet['command_seq']
             current.laser = packet['laser']
@@ -122,8 +126,9 @@ class ControllerBridge:
                 player_id, snapshot.aims.get(player_id) if valid else None,
                 bool(controller.buttons & 1) if connected else False,
                 bool(controller.buttons & 2) if connected else False,
-                connected, age,
+                connected, age, controller.special_pressed if connected else False,
             )
+            controller.special_pressed = False
         return result
 
     def set_target(self, target, now=None):

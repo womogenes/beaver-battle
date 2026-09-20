@@ -11,6 +11,7 @@ class PlayerInput:
     special: bool = False
     connected: bool = True
     aim_age: float = 0.0
+    special_pressed: bool = False
 
 
 @dataclass

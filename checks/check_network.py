@@ -186,3 +186,18 @@ def check_telemetry_scheduler():
 
 
 check_telemetry_scheduler()
+
+# A press and release drained in one poll must still deliver one menu click edge.
+edge_bridge = ControllerBridge(dict(network=dict(timeout=.5), camera=dict(stale_seconds=.5)))
+edge_packet = dict(v=1, type='input', id=1, boot=30, seq=0, buttons=0, command_seq=0, laser=True)
+for sequence, buttons in enumerate((0, 2, 0)):
+    edge_packet.update(seq=sequence, buttons=buttons)
+    assert edge_bridge.accept(json.dumps(edge_packet), ('127.0.0.1', 1), 10)
+edge_snapshot = VisionSnapshot(timestamp=10)
+control = edge_bridge.inputs(edge_snapshot, 10)[1]
+assert control.special_pressed and not control.special
+assert not edge_bridge.inputs(edge_snapshot, 10)[1].special_pressed
+edge_packet.update(seq=3, buttons=2)
+edge_bridge.accept(json.dumps(edge_packet), ('127.0.0.1', 1), 10)
+assert not edge_bridge.inputs(edge_snapshot, 11)[1].special_pressed
+print('Quick menu press survives packet batching exactly once; stale edges discarded')

@@ -130,3 +130,8 @@ that player's D33 servo. The reduced-load trial ramps 990 → 675 → 990 µs in
 use the user-confirmed endpoints. Repeated packets never repeat a squeeze; hits during
 a running cycle or its two-second cooldown are consumed without queuing. Buttons keep
 their normal laser/game functions. Older Arduino builds must be reflashed for feedback.
+
+Menu selection preserves a quick second-button tap even when press and release
+arrive between game frames. If the laser position briefly drops out at the press,
+the click waits up to 300 ms for a fresh position from that same controller. It
+expires on disconnect, timeout, or a menu change; it never clicks a stored old aim.

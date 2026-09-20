@@ -39,6 +39,8 @@ class Scenario:
     game: object = None
     vision: object = None
     posted: list = field(default_factory=list)
+    missing_aim: bool = False
+    press_edge: bool = False
 
     def tick(self, fps):
         self.now += .1
@@ -78,7 +80,7 @@ class Scenario:
         bridge = Mock()
         bridge.active_ids.side_effect = lambda now: self.active[:]
         bridge.inputs.side_effect = lambda snapshot, now: {
-            player: PlayerInput(player, (640, 360), *self.buttons.get(player, (False, False)))
+            player: PlayerInput(player, None if self.missing_aim else (640, 360), *self.buttons.get(player, (False, False)), special_pressed=self.press_edge and player == 1)
             for player in self.active}
         with contextlib.ExitStack() as patches:
             for target, name, value in (
@@ -203,6 +205,21 @@ def laser_select(run, state):
     return pending
 
 
+def laser_select_gap(run, state):
+    run.press_edge = run.frames == 2
+    run.missing_aim = run.frames <= (8 if run.fault == 'expired' else 3)
+    if state['mode'] == 'info':
+        assert run.fault != 'expired'
+        run.done = True
+    if run.frames == 10:
+        assert run.fault == 'expired' and state['mode'] == 'lobby'
+        assert not any(e.type == pygame.MOUSEBUTTONDOWN for e in run.posted)
+        run.done = True
+    pending = run.posted[run.checkpoint:]
+    run.checkpoint = len(run.posted)
+    return pending
+
+
 def calibration_cancel(run, state):
     if run.stage == 0:
         run.stage = 1
@@ -263,6 +280,8 @@ def main():
     hovers = [event.pos for event in pointed.posted if event.type == pygame.MOUSEMOTION]
     assert hovers and set(hovers) == {(640, 360)}, 'the lowest controller\'s dot hovers the menu'
 
+    for fault in ('brief', 'expired'):
+        Scenario(laser_select_gap, fault).run()
     selected = Scenario(laser_select).run()
     clicks = [event for event in selected.posted if event.type == pygame.MOUSEBUTTONDOWN]
     assert len(clicks) == 1 and clicks[0].pos == (640, 360), 'Player 2 clicks its hovered item once per press'
