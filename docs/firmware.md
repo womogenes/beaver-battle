@@ -226,6 +226,17 @@ frames were lost beyond the gaps themselves and the lit runs came back at 333 ms
 than 467. Identification was unaffected, which is the whole reason for keying on period
 rather than duty: dropouts lower the correlation peak without moving it.
 
+Controller 3, the case the fixed gap had made weakest, was then flashed and measured on
+the board: the dot was found on 79 percent of frames against a ceiling of 78, so on every
+frame it should have been lit; dark runs came back at a median of 200 ms against the
+programmed 220; correlation at its own period was +0.91 against -0.23 and -0.20 at the
+other two; and identification was correct on 100 percent of windows two seconds long.
+Position held to 2.8 px median error with 3.0 px of jitter, better than controller 1.
+
+Beware of measuring a window in which nobody was holding the button. Several runs while
+setting this up read as a weak or failing laser, and the laser was simply not lit; a
+measurement of laser strength is only meaningful alongside evidence the laser was on.
+
 The gap is 22 percent of the period, so 132, 176 and 220 ms for controllers 1 to 3, and
 `BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the
 longest period the smallest share and therefore the least signal to correlate: simulated at
