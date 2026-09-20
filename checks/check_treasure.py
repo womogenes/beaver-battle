@@ -12,7 +12,7 @@ import pygame
 from beaver_battle import sound
 from beaver_battle.leaderboard import Leaderboard
 from beaver_battle.model import PlayerInput
-from beaver_battle.treasure import BOARDS, SOLO_BOARDS, Cow, Treasure, cheapest_route
+from beaver_battle.treasure import BOARDS, SOLO_BOARDS, Deer, Treasure, cheapest_route
 
 pygame.init()
 with open("config.toml", "rb") as source:
@@ -20,7 +20,7 @@ with open("config.toml", "rb") as source:
 
 
 bare = copy.deepcopy(config)
-bare["treasure"].update(trees=0, logs=0, boost_clusters=0, cows=0)
+bare["treasure"].update(trees=0, logs=0, boost_clusters=0, deer=0)
 
 
 def fresh(board, bots=(), dressed=False):
@@ -137,7 +137,7 @@ assert 5 < sum(times) / len(times) < 16, times
 # A duel's scatter of trees, logs and boost tokens is mirrored, never seals anyone in, and changes from match to match;
 # a one-player board is dressed the same way every time, so today's times are comparable.
 game = fresh(6, dressed=True)
-assert game.trees and game.logs and game.boosts and game.cows and game.portals
+assert game.trees and game.logs and game.boosts and game.deer and game.portals
 for things in (game.trees, [(first, half) for first, second, half in game.logs], [(place, alive) for place, alive in game.boosts]):
     spots = sorted((round(place.x), round(place.y)) for place, extra in things)
     assert spots == sorted((game.width - x, y) for x, y in spots), "a duel's fixed scatter must be mirrored"
@@ -191,17 +191,17 @@ draw(without, without.runners[1], [left.start, (left.start.x, entry.y), entry])
 draw(without, without.runners[1], [exit_pad, (exit_pad.x + 40, game.chest.y - 60), game.chest])
 assert without.find_route(without.runners[1], without.runners[1].ink)[0] is None, "without the portal those two strokes do not connect"
 
-# A cow in the way holds a beaver up only while it stands there; a boost token gives a burst of speed and is used up.
+# A deer in the way holds a beaver up only while it stands there; a boost token gives a burst of speed and is used up.
 game = fresh(1)
 left = game.runners[1]
 draw(game, left, game.bot_plan(left))
 draw(game, game.runners[2], game.bot_plan(game.runners[2]))
 game.judge()
 run(game, config["treasure"]["check_seconds"] + .1)
-blocker = Cow(game.point_at(left, 45), game.point_at(left, 45), wait=99)
-game.cows = [blocker]
+blocker = Deer(game.point_at(left, 45), game.point_at(left, 45), wait=99)
+game.deer = [blocker]
 run(game, 2, lambda: tracing(game))
-assert left.travelled < 30 and left.held and left.state != "stuck" and "moo" in game.sounds
+assert left.travelled < 30 and left.held and left.state != "stuck" and "bleat" in game.sounds
 blocker.pos.update(40, 700)
 blocker.target.update(40, 700)
 run(game, 1, lambda: tracing(game))
@@ -210,15 +210,15 @@ game.boosts = [[game.point_at(left, left.travelled + 30), True]]
 run(game, 1, lambda: tracing(game))
 assert not game.boosts[0][1] and "zip" in game.sounds and left.boost > 0
 
-# Cows keep to the grass: never in a pond, a rock or a tree, and never parked on a start pad or the chest.
+# Deer keep to the grass: never in a pond, a rock or a tree, and never parked on a start pad or the chest.
 game = fresh(7, dressed=True)
 for step in range(60 * 40):
-    game.update_cows(1 / 60)
+    game.update_deer(1 / 60)
     if step % 30 == 0:
-        for cow in game.cows:
-            assert not game.in_water(cow.pos) and game.blocked_at(cow.pos) is None
-            assert all(cow.pos.distance_to(pad) > 40 for pad in [runner.start for runner in game.runners.values()] + [game.chest])
-assert any(cow.pos.distance_to(cow.target) > 1 or cow.wait > 0 for cow in game.cows)
+        for deer in game.deer:
+            assert not game.in_water(deer.pos) and game.blocked_at(deer.pos) is None
+            assert all(deer.pos.distance_to(pad) > 40 for pad in [runner.start for runner in game.runners.values()] + [game.chest])
+assert any(deer.pos.distance_to(deer.target) > 1 or deer.wait > 0 for deer in game.deer)
 
 # Solo: one beaver crosses the whole board, edge to edge, on the clock, on every board, the lopsided ones included.
 for index in range(len(BOARDS) + len(SOLO_BOARDS)):
@@ -259,5 +259,5 @@ names = {word for line in open("beaver_battle/treasure.py") if "sounds.append(" 
 assert names <= set(sound.build()), names - set(sound.build())
 
 print(f"Treasure checks passed: {len(BOARDS)} fair mirrored boards and {len(SOLO_BOARDS)} lopsided one-player boards, gap merging, broken paths, "
-      "rocks, trees, logs, portals, cows, boost tokens, mirrored scatter, tracing, water, boost, solo, leaderboard, "
+      "rocks, trees, logs, portals, deer, boost tokens, mirrored scatter, tracing, water, boost, solo, leaderboard, "
       f"bot races averaging {sum(times) / len(times):.0f} s, rendering, sounds")

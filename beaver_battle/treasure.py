@@ -42,14 +42,14 @@ BOARDS = [
 
 # One player crosses the whole board, so these need not be symmetric: written edge to edge, never mirrored.
 SOLO_BOARDS = [
-    {"name": "THE BIG RIVER", "whole": True, "cows": 2,
+    {"name": "THE BIG RIVER", "whole": True, "deer": 2,
      "rocks": [(.25, .40, .04), (.30, .70, .04), (.72, .35, .04), (.70, .68, .04), (.40, .22, .035), (.62, .84, .035)],
      "ponds": [(.5, .14, .055, .13), (.49, .34, .075, .15), (.51, .56, .085, .15), (.49, .78, .075, .15), (.5, .95, .055, .1), (.2, .8, .06, .09), (.8, .25, .06, .09)],
      "portals": [((.34, .20), (.66, .86))]},
-    {"name": "COW PASTURE", "whole": True, "cows": 6, "boosts": 5,
+    {"name": "DEER PARK", "whole": True, "deer": 6, "boosts": 5,
      "rocks": [(.22, .30, .035), (.35, .66, .035), (.5, .40, .04), (.64, .70, .035), (.78, .34, .035)],
      "ponds": [(.30, .42, .06, .10), (.58, .56, .07, .11), (.74, .80, .06, .09), (.44, .84, .05, .08)]},
-    {"name": "PORTAL WOODS", "whole": True, "cows": 2, "trees": 4,
+    {"name": "PORTAL WOODS", "whole": True, "deer": 2, "trees": 4,
      "rocks": [(.5, y, .034) for y in (.2, .31, .42, .64, .75, .86)] + [(.30, .53, .035), (.70, .53, .035)],
      "ponds": [(.5, .53, .05, .08), (.36, .28, .06, .09), (.66, .80, .06, .09)],
      "portals": [((.24, .84), (.60, .22)), ((.40, .20), (.78, .82))]},
@@ -145,7 +145,7 @@ def segment_distance(point, first, second):
 
 
 @dataclass
-class Cow:
+class Deer:
     pos: pygame.Vector2
     target: pygame.Vector2
     wait: float = 0.0
@@ -174,7 +174,7 @@ class Runner:
     drawn: float = 0.0
     lapse: float = 0.0
     jumps: list = field(default_factory=list)  # Distances along the route at which a portal is taken.
-    moo: float = 0.0
+    startled: float = 0.0
     held: bool = False
 
 
@@ -194,7 +194,7 @@ class Treasure:
     logs: list = field(default_factory=list)
     portals: list = field(default_factory=list)
     boosts: list = field(default_factory=list)
-    cows: list = field(default_factory=list)
+    deer: list = field(default_factory=list)
     matches: int = 0
     water: np.ndarray | None = None
     chest: pygame.Vector2 = field(default_factory=pygame.Vector2)
@@ -268,10 +268,10 @@ class Treasure:
         return BOARDS + SOLO_BOARDS if solo else BOARDS
 
     def decorate(self, whole):
-        """Scatter trees, logs, boost clusters and cows. In a duel the fixed things are placed on one half
-        and mirrored; cows wander, so they are simply dropped anywhere. Nothing may seal a beaver in."""
+        """Scatter trees, logs, boost clusters and deer. In a duel the fixed things are placed on one half
+        and mirrored; deer run about, so they are simply dropped anywhere. Nothing may seal a beaver in."""
         unit, rng = self.scale, self.rng
-        self.trees, self.logs, self.boosts, self.cows = [], [], [], []
+        self.trees, self.logs, self.boosts, self.deer = [], [], [], []
         pads = [runner.start for runner in self.runners.values()] + [self.chest, pygame.Vector2(self.width - self.chest.x, self.chest.y)]
 
         def spot(reach, everywhere=False, dry=False):
@@ -294,11 +294,15 @@ class Treasure:
                 if not self.passable():
                     del self.trees[-len(twins(point)):]
         for index in range(self.board.get("logs", self.setting("logs", 2)) * half):
-            point, angle, reach = spot(50 * unit), rng.uniform(0, math.pi), rng.uniform(34, 52) * unit
+            point, angle, reach = spot(24 * unit), rng.uniform(0, math.pi), rng.uniform(55, 80) * unit
+            arm = pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
+            # A long log only needs its own length clear, not a whole circle of that radius.
+            if point is not None and any(self.blocked_at(point + arm * step, 30 * unit) is not None or
+                                         any((point + arm * step).distance_to(pad) < 95 * unit for pad in pads) for step in (-1, -.5, .5, 1)):
+                point = None
             if point is not None:
-                arm = pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
                 pairs = [(point - arm, point + arm)] if whole else [(point - arm, point + arm), (pygame.Vector2(self.width - (point - arm).x, (point - arm).y), pygame.Vector2(self.width - (point + arm).x, (point + arm).y))]
-                self.logs += [(first, second, 10 * unit) for first, second in pairs]
+                self.logs += [(first, second, 17 * unit) for first, second in pairs]
                 if not self.passable():
                     del self.logs[-len(pairs):]
         for index in range(self.board.get("boosts", self.setting("boost_clusters", 2)) * half):
@@ -307,10 +311,10 @@ class Treasure:
                 for step in (-1, 0, 1):
                     token = point + pygame.Vector2(math.cos(angle), math.sin(angle)) * step * 30 * unit
                     self.boosts += [[twin, True] for twin in twins(token)]
-        for index in range(self.board.get("cows", self.setting("cows", 2))):
+        for index in range(self.board.get("deer", self.setting("deer", 2))):
             point = spot(30 * unit, everywhere=True, dry=True)
             if point is not None:
-                self.cows.append(Cow(point, point.copy(), rng.uniform(0, 2)))
+                self.deer.append(Deer(point, point.copy(), rng.uniform(0, 2)))
 
     def passable(self):
         return all(len(self.bot_plan(runner)) > 2 for runner in self.runners.values())
@@ -466,7 +470,7 @@ class Treasure:
             particle[4] -= dt
         self.particles = [particle for particle in self.particles if particle[4] > 0][-400:]
         if self.phase != "match_over":
-            self.update_cows(dt)
+            self.update_deer(dt)
         if self.phase == "drawing":
             self.update_drawing(dt, inputs, ink)
         elif self.phase == "checking":
@@ -476,29 +480,29 @@ class Treasure:
         elif self.phase == "running":
             self.update_running(dt, inputs)
 
-    def update_cows(self, dt):
-        """Cows amble from one patch of grass to the next, stopping to graze. They go where they like."""
+    def update_deer(self, dt):
+        """Deer dart from one patch of grass to the next with short pauses to look about. They go where they like."""
         unit = self.scale
         pads = [runner.start for runner in self.runners.values()] + [self.chest]
-        for cow in self.cows:
-            if cow.wait > 0:
-                cow.wait -= dt
+        for deer in self.deer:
+            if deer.wait > 0:
+                deer.wait -= dt
                 continue
-            gap = cow.target - cow.pos
+            gap = deer.target - deer.pos
             if gap.length() < 3 * unit:
-                cow.wait = self.rng.uniform(.6, 2.6)
+                deer.wait = self.rng.uniform(.25, 1.3)
                 for attempt in range(12):
-                    angle, reach = self.rng.uniform(0, math.tau), self.rng.uniform(70, 230) * unit
-                    target = cow.pos + pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
+                    angle, reach = self.rng.uniform(0, math.tau), self.rng.uniform(110, 340) * unit
+                    target = deer.pos + pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
                     roomy = 60 * unit < target.x < self.width - 60 * unit and 100 * unit < target.y < self.height - 50 * unit
-                    way = [cow.pos.lerp(target, step / 8) for step in range(1, 9)]
+                    way = [deer.pos.lerp(target, step / 8) for step in range(1, 9)]
                     if roomy and not any(self.in_water(point) or self.blocked_at(point, 22 * unit) is not None for point in way) \
                             and all(target.distance_to(pad) > 90 * unit for pad in pads):
-                        cow.target = target
+                        deer.target = target
                         break
                 continue
-            cow.facing = 1 if gap.x >= 0 else -1
-            cow.pos += gap.normalize() * min(gap.length(), self.setting("cow_speed", 24) * unit * dt)
+            deer.facing = 1 if gap.x >= 0 else -1
+            deer.pos += gap.normalize() * min(gap.length(), self.setting("deer_speed", 95) * unit * dt)
 
     def update_drawing(self, dt, inputs, ink):
         before = math.ceil(self.timer)
@@ -552,7 +556,7 @@ class Treasure:
         for runner in self.runners.values():
             if runner.state in ("stuck", "home"):
                 continue
-            runner.boost, runner.cooldown, runner.moo = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt), max(0.0, runner.moo - dt)
+            runner.boost, runner.cooldown, runner.startled = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt), max(0.0, runner.startled - dt)
             runner.held = False
             if runner.player_id in self.bots:
                 aim, special = self.bot_trace(runner, dt)
@@ -584,12 +588,12 @@ class Treasure:
                 runner.state = "stuck"
                 self.sounds.append("bonk")
                 continue
-            if any(cow.pos.distance_to(place) < 30 * self.scale and cow.pos.distance_to(place) < cow.pos.distance_to(runner.pos) for cow in self.cows):
-                # A cow in the way: wait for it to wander off. Unlike a rock, it will.
+            if any(deer.pos.distance_to(place) < 30 * self.scale and deer.pos.distance_to(place) < deer.pos.distance_to(runner.pos) for deer in self.deer):
+                # A deer in the way: wait for it to bound off. Unlike a rock, it will.
                 runner.held = True
-                if runner.moo == 0:
-                    runner.moo = 1.6
-                    self.sounds.append("moo")
+                if runner.startled == 0:
+                    runner.startled = 1.6
+                    self.sounds.append("bleat")
                 continue
             for mark in runner.jumps:
                 if runner.travelled <= mark < ahead:
@@ -685,7 +689,7 @@ class Treasure:
             surface.blit(sheet, (0, 0))
         for first, second, half in self.logs:
             along = second - first
-            image = sprites.log(along.length() / unit + 2 * half / unit, 2.2 * half / unit, unit, seed=round(first.x + first.y))
+            image = sprites.timber(along.length() / unit + 2 * half / unit, 2.1 * half / unit, unit, seed=round(first.x + first.y))
             image = pygame.transform.rotozoom(image, -math.degrees(math.atan2(along.y, along.x)), 1)
             surface.blit(image, image.get_rect(center=(first + second) / 2))
         for index, (center, radius) in enumerate(self.rocks):
@@ -736,10 +740,10 @@ class Treasure:
         chest = self.sprite(("chest", self.phase == "match_over" and self.winner is not None),
                             lambda: sprites.chest(48 * unit, open_lid=self.phase == "match_over" and self.winner is not None))
         frame.blit(chest, chest.get_rect(center=self.chest + pygame.Vector2(0, -4 * unit * abs(math.sin(self.clock * 2.4)))))
-        for cow in self.cows:
-            image = self.sprite(("cow", cow.facing), lambda: pygame.transform.flip(sprites.cow(24 * unit), cow.facing < 0, False))
-            walking = cow.wait <= 0
-            frame.blit(image, image.get_rect(center=cow.pos + pygame.Vector2(0, 1.5 * unit * math.sin(self.clock * 8 + cow.pos.x) if walking else 0)))
+        for deer in self.deer:
+            image = self.sprite(("deer", deer.facing), lambda: pygame.transform.flip(sprites.deer(24 * unit), deer.facing < 0, False))
+            walking = deer.wait <= 0
+            frame.blit(image, image.get_rect(center=deer.pos + pygame.Vector2(0, 2.5 * unit * abs(math.sin(self.clock * 14 + deer.pos.x)) if walking else 0)))
         for runner in self.runners.values():
             self.draw_beaver(frame, runner, colors[runner.player_id])
         for x, y, vx, vy, life, size in self.particles:
@@ -769,8 +773,8 @@ class Treasure:
         pygame.draw.rect(frame, sprites.tint(color, .45), plate, border_radius=round(12 * unit))
         frame.blit(word, word.get_rect(center=plate.center))
         if runner.held:
-            moo = sprites.sign("MOO!", max(14, round(24 * unit)))
-            frame.blit(moo, moo.get_rect(center=center + pygame.Vector2(0, 30 * unit)))
+            oops = sprites.sign("DEER!", max(14, round(24 * unit)))
+            frame.blit(oops, oops.get_rect(center=center + pygame.Vector2(0, 30 * unit)))
         if runner.state == "stuck":
             stuck = sprites.sign("STUCK!", max(14, round(26 * unit)))
             frame.blit(stuck, stuck.get_rect(center=center + pygame.Vector2(0, 30 * unit)))

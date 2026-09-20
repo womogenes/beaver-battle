@@ -657,28 +657,53 @@ def tree(radius, seed=1, zoom=1):
     return pen.image()
 
 
-COW_SPOT = (176, 132, 104)
+FAWN = (206, 158, 112)
+FAWN_DARK = (168, 120, 88)
 
 
-def cow(size, zoom=1):
-    """A cow from above, facing right: a white barrel of a body with patches, a pink nose and small horns."""
-    pen = Pen(86, 60, size * zoom / 26, zoom)
-    pen.line(CREAM, (-30, 0), (-38, 5), 2.2)
-    pen.ellipse(COW_SPOT, (-39, 6), 3, outline=None)
-    for x in (-13, 12):
+def deer(size, zoom=1):
+    """A deer from above, facing right: a slim fawn-coloured body with pale spots, a white tail and antlers."""
+    pen = Pen(96, 64, size * zoom / 26, zoom)
+    for x in (-12, 10):
         for side in (-1, 1):
-            pen.ellipse(CREAM, (x, side * 17), 4.5, 5.5)
-    shapes = [(CREAM, pen.oval((-4, 0), 27, 18)), (CREAM, pen.oval((26, 0), 12, 11))]
-    shapes += [(CREAM, pen.oval((24, side * 12), 5, 3.2, side * .5)) for side in (-1, 1)]
-    pen.union(shapes, 1.6)
-    for x, y, rx, ry, turn in ((-14, -6, 10, 7, .3), (2, 8, 8, 6, -.4), (-22, 9, 5, 4, 0), (12, -9, 5, 4, .2)):
-        pen.ellipse(COW_SPOT, (x, y), rx, ry, turn, outline=None)
-    pen.ellipse(PINK, (34, 0), 5, 8, width=1.3)
+            pen.ellipse(FAWN_DARK, (x, side * 12), 3.4, 5, outline=FUR_LINE, width=1.3)
+    shapes = [(FAWN, pen.oval((-4, 0), 25, 12)), (FAWN, pen.oval((22, 0), 11, 7)), (FAWN, pen.oval((33, 0), 8, 6.5))]
+    shapes += [(FAWN, pen.oval((30, side * 8.5), 5.5, 2.6, side * .9)) for side in (-1, 1)]
+    pen.union(shapes, 1.5, FUR_LINE)
+    pen.ellipse(WHITE, (-29, 0), 5, 4, outline=FUR_LINE, width=1.2)
+    for x, y in ((-16, -4), (-8, 4), (0, -5), (7, 3), (-20, 5), (-3, 0)):
+        pen.ellipse(CREAM, (x, y), 2.1, outline=None)
+    pen.ellipse(FAWN_DARK, (-4, 0), 17, 2.2, outline=None)
     for side in (-1, 1):
-        pen.ellipse(EYE, (35, side * 3), 1.1, outline=None)
-        pen.ellipse(EYE, (25, side * 5.5), 1.8, outline=None)
-        pen.poly(WOOD_LIGHT, [(19, side * 8), (22, side * 15), (24, side * 8.5)], INK, 1)
+        # Antlers: a main beam sweeping back with two tines.
+        pen.stroke([(31, side * 4), (27, side * 12), (19, side * 17)], WOOD_LIGHT, 2.4, closed=False)
+        pen.stroke([(27, side * 12), (31, side * 18)], WOOD_LIGHT, 2, closed=False)
+        pen.stroke([(23, side * 15), (22, side * 21)], WOOD_LIGHT, 2, closed=False)
+        pen.ellipse(EYE, (35, side * 3.4), 1.5, outline=None)
+    pen.ellipse(EYE, (40.5, 0), 2.2, 2.6, outline=None)
     return pen.image()
+
+
+def timber(length, width, zoom=1, seed=0):
+    """A plain floating log: the bark wallpaper with its grain along the log, round ends and a bark-brown edge."""
+    rng = random.Random(seed)
+    size = (max(2, round(length * zoom * SS)), max(2, round(width * zoom * SS)))
+    surface = pygame.Surface(size, pygame.SRCALPHA)
+    side = max(8, round(width * zoom * SS * 2.6))
+    texture = pygame.transform.smoothscale(pygame.transform.rotate(art("bark_rich.jpg"), 90), (side, side))
+    for x in range(-rng.randrange(side // 2), size[0], side):
+        for y in range(-rng.randrange(side // 2), size[1], side):
+            surface.blit(texture, (x, y))
+    shade = pygame.Surface(size, pygame.SRCALPHA)
+    pygame.draw.rect(shade, (70, 40, 30, 70), (0, size[1] * .68, size[0], size[1] * .32))
+    pygame.draw.rect(shade, (255, 240, 210, 46), (0, size[1] * .08, size[0], size[1] * .2))
+    surface.blit(shade, (0, 0))
+    corner = round(size[1] * .46)
+    mask = pygame.Surface(size, pygame.SRCALPHA)
+    pygame.draw.rect(mask, WHITE, mask.get_rect(), border_radius=corner)
+    surface.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    pygame.draw.rect(surface, BARK_LINE, surface.get_rect(), max(1, round(2.4 * zoom * SS)), border_radius=corner)
+    return pygame.transform.smoothscale(surface, (max(1, size[0] // SS), max(1, size[1] // SS)))
 
 
 def boost_token(size, zoom=1):

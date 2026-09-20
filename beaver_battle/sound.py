@@ -85,7 +85,7 @@ def build():
         "step": mix(noise(.05, 30, 24) * decay(.05, 60) * .5, sweep(.06, 140, 90) * decay(.06, 45) * .4),
         "bonk": mix(sweep(.22, 240, 70, "square") * decay(.22, 12) * .7, noise(.06, 5, 25) * decay(.06, 40) * .7),
         "treasure": mix(notes((523, 659, 784, 1047, 1319), .15, rate=5) * .5, after(.5, notes((2093, 2637, 3136, 2637, 3136), .07, rate=18) * .3)),
-        "moo": (sweep(.7, 150, 118, "saw") * .5 + sweep(.7, 300, 236) * .35) * np.minimum(1, span(.7) / .12) * np.minimum(1, (.7 - span(.7)) / .25) * .7,
+        "bleat": (sweep(.28, 620, 480, "saw") * .4 + sweep(.28, 1240, 960) * .3) * (1 + .5 * np.sin(span(.28) * 95)) * np.minimum(1, span(.28) / .03) * np.minimum(1, (.28 - span(.28)) / .1) * .6,
         "warp": mix(sweep(.35, 300, 1800) * decay(.35, 5, .02) * .4, sweep(.35, 1800, 500, "saw") * decay(.35, 7, .02) * .2, after(.2, notes((1568, 2093), .08, rate=16) * .3)),
         "zip": mix(sweep(.18, 500, 1600, "square") * decay(.18, 12) * .3, after(.05, notes((1319, 1760), .07, rate=18) * .35)),
         "charm": sweep(.2, 500, 1100) * decay(.2, 9, .03) * .35,
