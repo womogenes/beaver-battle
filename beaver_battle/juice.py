@@ -83,7 +83,7 @@ class Juice:
                     self.zoom_age, self.focus = 0.0, pos.copy()
             elif kind == "round":
                 winner, match = event[2], event[3]
-                self.banner = (f"{game.name(winner)}!", self.color(winner), match)
+                self.banner = (f"{game.name(winner)} WINS!" if winner else "DRAW!", self.color(winner), match)
                 self.banner_age = -.45
             elif kind == "pickup":
                 player_id = event[2]
@@ -300,7 +300,7 @@ class Juice:
         center = (game.width / 2, game.height * .44 + 5 * unit * math.sin(age * 3))
         surface.blit(title, title.get_rect(center=center))
         if age > .3:
-            text = "WINS THE MATCH!" if match else f"NEXT ROUND IN {max(1, math.ceil(game.round_timer))}"
+            text = "THE WHOLE MATCH!" if match else f"NEXT ROUND IN {max(1, math.ceil(game.round_timer))}"
             if message == "DRAW!":
                 text = "NOBODY WINS THAT ONE"
             # Solid dark letters on the cream plate: white-on-cream was hard to read from across a room.

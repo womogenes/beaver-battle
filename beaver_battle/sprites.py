@@ -79,13 +79,26 @@ def typeface(size):
     return art_cache[key]
 
 
-def lettering(message, size, color):
-    """Plain text in the display face, surviving a pygame restart since the font was opened."""
+def lettering(message, size, color, spacing=0):
+    """Plain text in the display face, surviving a pygame restart since the font was opened.
+
+    spacing opens the letters up, which heavily outlined text needs or its outlines run together.
+    """
     try:
-        return typeface(size).render(message, True, color)
+        font = typeface(size)
+        font.size("A")
     except pygame.error:
         del art_cache[("typeface", size)]
-        return typeface(size).render(message, True, color)
+        font = typeface(size)
+    if not spacing or len(message) < 2:
+        return font.render(message, True, color)
+    glyphs = [font.render(letter, True, color) for letter in message]
+    image = pygame.Surface((sum(glyph.get_width() for glyph in glyphs) + spacing * (len(glyphs) - 1), font.get_height()), pygame.SRCALPHA)
+    x = 0
+    for glyph in glyphs:
+        image.blit(glyph, (x, 0))
+        x += glyph.get_width() + spacing
+    return image
 
 
 def label(message, size, fill=WHITE, ink=INK, tilt=0):
@@ -98,23 +111,38 @@ def label(message, size, fill=WHITE, ink=INK, tilt=0):
         if sum(1 for name in art_cache if name[0] == "label") > 300:
             for name in [name for name in art_cache if name[0] == "label"]:
                 del art_cache[name]
-        big = size >= 30
-        rim = max(2, round(size * .045)) if big else 0
-        edge, drop = rim + max(2, round(size * .085)), max(2, round(size * (.16 if big else .12)))
-        face, shade, white, shine = [lettering(message, size, color) for color in (fill, ink, WHITE, tint(fill, .5))]
+        big, spacing = size >= 30, 0
+        if fill == WHITE:
+            # White letters have no colour of their own to stand on, so they get the most line work:
+            # a heavy outline, a white halo beyond it, and a fine outer line to close the halo off.
+            heavy, halo, fine = max(2, round(size * .12)), max(1, round(size * .06)), max(1, round(size * .035))
+            rings = [(ink, heavy + halo + fine), (WHITE, heavy + halo), (ink, heavy)] if size >= 24 else [(ink, heavy + 1)]
+            spacing = round(size * .07)
+        else:
+            rim = max(2, round(size * .045)) if big else 0
+            rings = [(ink, rim + max(2, round(size * .085)))] + ([(WHITE, rim)] if rim else [])
+        edge, drop = rings[0][1], max(2, round(size * (.16 if big else .12)))
+        face, shine = lettering(message, size, fill, spacing), lettering(message, size, tint(fill, .5), spacing)
 
-        def ringed(source, reach):
+        def ringed(color, reach):
+            source = lettering(message, size, color, spacing)
             ring = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
-            for step in range(28):
-                ring.blit(source, (edge + reach * math.cos(step * math.tau / 28), edge + reach * math.sin(step * math.tau / 28)))
+            steps = max(28, round(reach * 6))
+            for step in range(steps):
+                ring.blit(source, (edge + reach * math.cos(step * math.tau / steps), edge + reach * math.sin(step * math.tau / steps)))
+            if reach > 3:
+                # Fill the band between the letter and its outermost echo, so thick outlines stay solid.
+                for inner in range(3, round(reach), 3):
+                    for step in range(steps):
+                        ring.blit(source, (edge + inner * math.cos(step * math.tau / steps), edge + inner * math.sin(step * math.tau / steps)))
             return ring
 
-        outline = ringed(shade, edge)
+        outline = ringed(*rings[0])
         image = pygame.Surface((outline.get_width(), outline.get_height() + drop), pygame.SRCALPHA)
         for fall in range(drop + 1):
             image.blit(outline, (0, fall))
-        if rim:
-            image.blit(ringed(white, rim), (0, 0))
+        for color, reach in rings[1:]:
+            image.blit(ringed(color, reach), (0, 0))
         image.blit(face, (edge, edge))
         if big and fill != WHITE:
             # A lighter upper half, cut on a gentle slant, reads as gloss.

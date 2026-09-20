@@ -1235,11 +1235,16 @@ class Game:
             if player.invulnerability > 0:
                 pygame.draw.circle(surface, sprites.CREAM, player.pos, player.radius * 2.5, max(1, round(3 * unit)))
             tag = player.pos + pygame.Vector2(0, -player.radius * 2 - 14 * unit)
-            pygame.draw.circle(surface, INK, tag, 11 * unit)
-            pygame.draw.circle(surface, sprites.tint(color, .45), tag, 8.5 * unit)
-            self.text(surface, str(player.player_id), tag - pygame.Vector2(0, unit), 17, centered=True)
+            # A name plate over each boat: the first three letters of the name, or the player number.
+            short = (self.names.get(player.player_id) or "").replace(" ", "")[:3] or str(player.player_id)
+            word = sprites.lettering(short, max(12, round(19 * unit)), INK)
+            plate = pygame.Rect(0, 0, word.get_width() + 16 * unit, 24 * unit)
+            plate.center = tag
+            pygame.draw.rect(surface, INK, plate.inflate(5 * unit, 5 * unit), border_radius=round(14 * unit))
+            pygame.draw.rect(surface, sprites.tint(color, .45), plate, border_radius=round(12 * unit))
+            surface.blit(word, word.get_rect(center=plate.center))
             if player.powerup:
-                self.stamp(surface, self.sprite(("held", player.powerup), lambda: sprites.pickup(9 * unit, player.powerup)), tag + pygame.Vector2(24 * unit, 0))
+                self.stamp(surface, self.sprite(("held", player.powerup), lambda: sprites.pickup(9 * unit, player.powerup)), (plate.right + 15 * unit, tag.y))
             if player.state == "canoe":
                 for rock in range(self.setting("magazine", 3)):
                     center = player.pos + pygame.Vector2((rock - (self.setting("magazine", 3) - 1) / 2) * 10 * unit, player.radius * 2 + 8 * unit)
@@ -1299,6 +1304,6 @@ class Game:
             self.text(surface, "Erase or move a physical obstacle", (self.width / 2, self.height * .55), 26, centered=True)
         elif self.phase != "playing":
             if juice.banner is None:
-                juice.banner, juice.banner_age = (f"{self.name(self.winner)}!", juice.color(self.winner), self.phase == "match_over"), 1.0
+                juice.banner, juice.banner_age = (f"{self.name(self.winner)} WINS!" if self.winner else "DRAW!", juice.color(self.winner), self.phase == "match_over"), 1.0
             juice.draw_banner(surface, self)
         screen.blit(frame, (0, 0))
