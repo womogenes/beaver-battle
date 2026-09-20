@@ -57,18 +57,22 @@ void setupLaserPin() {
 // Move the laser to another pad without reflashing, so a pad that cannot drive the gate
 // can be told from a laser that is simply weak. Bench only, like the other serial commands.
 void switchLaserPin(int pin) {
-  // GPIO12 (MTDI) selects flash voltage at reset, and a board left with it pulled high does
-  // not boot at all -- "invalid header: 0xffffffff", recoverable only by holding BOOT. 0, 2
-  // and 15 are the other straps, and 6-11 are wired to the SPI flash. None may be driven.
-  const int forbidden[] = {0, 2, 6, 7, 8, 9, 10, 11, 12, 15};
-  for (size_t i = 0; i < sizeof(forbidden) / sizeof(forbidden[0]); i++) {
-    if (pin == forbidden[i]) {
-      Serial.printf("laser pin %d refused: strapping or flash pin\n", pin);
-      return;
+  // An allowlist, not a denylist: a denylist that misses one pin costs a board. Driving
+  // GPIO12, which is MTDI and sets flash voltage at reset, left one board booting to
+  // "invalid header: 0xffffffff" forever, with GPIO0 never reading low again under a held
+  // BOOT. Excluded here are the strapping pins 0, 2, 12 and 15, the SPI flash pins 6 to 11,
+  // the input-only pins 34 to 39, and the pins this controller already uses: FIRE, SPECIAL
+  // and the servo. What remains is safe to drive as an output.
+  const int allowed[] = {4, 5, 13, 16, 17, 18, 19, 21, 22, 23, 25, 26, 32};
+  bool permitted = false;
+  for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+    if (pin == allowed[i]) {
+      permitted = true;
+      break;
     }
   }
-  if (pin < 0 || pin > 33) {
-    Serial.printf("laser pin %d out of range\n", pin);
+  if (!permitted) {
+    Serial.printf("laser pin %d refused: not an allowed output pin\n", pin);
     return;
   }
   digitalWrite(laserPin, LOW);
