@@ -118,7 +118,7 @@ def main():
                         help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
-    parser.add_argument('--game', choices=('battle', 'treasure'), help='go straight to one game instead of the chooser')
+    parser.add_argument('--game', choices=('battle', 'treasure', 'solo'), help='go straight to one game instead of the chooser')
     parser.add_argument('--no-names', action='store_true', help='skip typing player names before a match')
     parser.add_argument('--mute', action='store_true', help='play no sound effects')
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
@@ -144,7 +144,8 @@ def main():
     import pygame
     from beaver_battle import sprites
     from beaver_battle.game import Game
-    from beaver_battle.treasure import Treasure
+    from beaver_battle.leaderboard import Leaderboard
+    from beaver_battle.treasure import BOARDS, Treasure
     from beaver_battle.vision import Vision
 
     pygame.init()
@@ -200,25 +201,36 @@ def main():
     # Two games share this launcher. The chooser comes first unless a flag or an unattended run picks one.
     treasure = Treasure(config)
     chosen = args.game or 'battle'
+    games = ('battle', 'treasure', 'solo')
+    scores = Leaderboard(config.get('treasure', {}).get('leaderboard_file', 'leaderboard.json'))
+    solo_board, recorded = 0, False
+    next_button = pygame.Rect(0, 0, 300, 66)
+    scores_button = pygame.Rect(0, 0, 360, 50)
+    scores_button.center = (width // 2, height - 40)
     resume_mode, home_pick, home_rects = 'game', 0, []
     unattended = args.headless or args.bench or args.seconds or args.calibrate
     if args.game is None and not unattended:
         mode = 'home'
-    elif chosen == 'treasure' and not unattended:
-        ids = [1, 2]
+    elif chosen in ('treasure', 'solo') and not unattended:
+        ids = [1] if chosen == 'solo' else [1, 2]
         mode = 'names' if ask_names else 'treasure'
-        treasure.new_match(ids, (2,) if args.simulate else ())
+        treasure.new_match(ids, (2,) if args.simulate and chosen == 'treasure' else (), solo_board if chosen == 'solo' else None, chosen == 'solo')
+        treasure.standings = scores.top(treasure.board['name']) if chosen == 'solo' else []
 
     def active_game():
         return treasure if (mode == 'treasure' or (mode in ('pause', 'info') and resume_mode == 'treasure')) else game
 
     def start_chosen():
         """Leave the chooser (or the name screen) for the game that was picked."""
-        if chosen == 'treasure':
+        if chosen in ('treasure', 'solo'):
             if not args.simulate and not snapshot.calibrated:
                 return 'lobby', 'Calibrate the board before starting.'
             treasure.names = dict(names)
-            treasure.new_match(ids[:2], (2,) if args.simulate else ())
+            if chosen == 'solo':
+                treasure.new_match(ids[:1], (), solo_board, True)
+                treasure.standings = scores.top(treasure.board['name'])
+            else:
+                treasure.new_match(ids[:2], (2,) if args.simulate else ())
             return 'treasure', ''
         if args.simulate:
             game.new_match(ids, walls)
@@ -257,42 +269,75 @@ def main():
         screen.blit(surface, ((width - surface.get_width()) // 2, y - (18 if large else 0)))
 
     def draw_home():
-        """Pick a game: two big cards, each showing a little of what it looks like."""
+        """Pick a game: three cards, each showing a little of what it looks like."""
         home_rects.clear()
         screen.fill((224, 239, 241))
-        text_line('PICK A GAME', 26, True)
-        cards = (('BEAVER BATTLE', ('Canoes, rocks and power-ups.', 'Sink the other beavers.', '2 or 3 players'), 'water.jpg'),
-                 ('TREASURE DASH', ('Draw a path to the chest,', 'then trace it to race there.', '2 players'), 'grass.jpg'))
+        text_line('PICK A GAME', 20, True)
+        cards = (('BEAVER BATTLE', ('Canoes, rocks, power-ups.', 'Sink the other beavers.', '2 or 3 players'), 'water.jpg'),
+                 ('TREASURE DASH', ('Draw a path to the chest,', 'then trace it to race.', '2 players'), 'grass.jpg'),
+                 ('SOLO DASH', ('Cross the whole board', 'against the clock.', "1 player  -  today's best times"), 'grass.jpg'))
         for index, (title, lines, ground) in enumerate(cards):
-            card = pygame.Rect(0, 0, 500, 440)
-            card.center = (width // 2 + (index * 2 - 1) * 290, height // 2 + 40)
+            card = pygame.Rect(0, 0, 392, 420)
+            card.center = (width // 2 + (index - 1) * 412, height // 2 + 22)
             home_rects.append(card)
             picked = index == home_pick
-            pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 10, 20 if picked else 10), border_radius=40)
-            pygame.draw.rect(screen, sprites.WHITE, card, border_radius=34)
-            scene = pygame.Rect(card.x + 22, card.y + 22, card.width - 44, 210)
+            pygame.draw.rect(screen, sprites.BLUE, card.inflate(20 if picked else 8, 20 if picked else 8), border_radius=38)
+            pygame.draw.rect(screen, sprites.WHITE, card, border_radius=32)
+            scene = pygame.Rect(card.x + 18, card.y + 18, card.width - 36, 190)
             view = sprites.tiled_ground(ground, scene.width, scene.height, 300, lighten=.35 if index == 0 else .1)
             if index == 0:
-                for place, color, turn in (((120, 110), sprites.PLAYER_COLORS[0], 20), ((330, 95), sprites.PLAYER_COLORS[1], 165)):
-                    boat = pygame.transform.rotozoom(sprites.canoe(18, color, 1.5), -turn, 1)
+                for place, color, turn in (((95, 100), sprites.PLAYER_COLORS[0], 20), ((262, 88), sprites.PLAYER_COLORS[1], 165)):
+                    boat = pygame.transform.rotozoom(sprites.canoe(18, color, 1.35), -turn, 1)
                     view.blit(boat, boat.get_rect(center=place))
-                    head = sprites.tim(19, 1.5)
+                    head = sprites.tim(19, 1.35)
                     view.blit(head, head.get_rect(center=place))
                 rock = sprites.pebble(5, zoom=2)
-                view.blit(rock, rock.get_rect(center=(225, 100)))
+                view.blit(rock, rock.get_rect(center=(180, 94)))
             else:
-                pygame.draw.lines(view, sprites.INK, False, [(60, 150), (130, 120), (190, 150), (260, 118), (320, 112)], 13)
-                pygame.draw.lines(view, sprites.PLAYER_COLORS[0], False, [(60, 150), (130, 120), (190, 150), (260, 118), (320, 112)], 8)
-                for piece, place in ((sprites.boulder(22, 3), (170, 78)), (sprites.chest(74), (360, 100)), (sprites.tim(24, 1.4), (70, 140))):
+                trail = [(52, 138), (112, 108), (168, 140), (232, 104), (292, 100)]
+                pygame.draw.lines(view, sprites.INK, False, trail, 13)
+                pygame.draw.lines(view, sprites.PLAYER_COLORS[0 if index == 1 else 2], False, trail, 8)
+                pieces = [(sprites.boulder(20, 3), (150, 70)), (sprites.chest(66), (316, 92)), (sprites.tim(22, 1.3), (58, 128))]
+                if index == 2:
+                    clock = sprites.label('0:24', 40, sprites.BUTTER)
+                    pieces.append((clock, (178, 36)))
+                for piece, place in pieces:
                     view.blit(piece, piece.get_rect(center=place))
             screen.blit(view, scene)
             pygame.draw.rect(screen, sprites.BLUE, scene, 4, border_radius=6)
-            name = sprites.label(title, 52, sprites.BLUE_BRIGHT)
-            screen.blit(name, name.get_rect(center=(card.centerx, scene.bottom + 52)))
+            name = sprites.label(title, 44, sprites.BLUE_BRIGHT)
+            screen.blit(name, name.get_rect(center=(card.centerx, scene.bottom + 46)))
             for row, line in enumerate(lines):
-                image = sprites.sign(line, 28, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
-                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 104 + row * 36)))
-        text_line('Click a game, or use the arrow keys and Enter' if args.simulate else 'Click a game, or button 1 to switch and button 2 to choose', height - 52)
+                image = sprites.sign(line, 25, sprites.BLUE if row < 2 else sprites.BLUE_BRIGHT)
+                screen.blit(image, image.get_rect(center=(card.centerx, scene.bottom + 96 + row * 34)))
+        hover = scores_button.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, sprites.BLUE, scores_button.inflate(8, 8), border_radius=30)
+        pygame.draw.rect(screen, sprites.BLUE if hover else sprites.WHITE, scores_button, border_radius=26)
+        face = sprites.lettering("TODAY'S BEST TIMES  (B)", 28, sprites.WHITE if hover else sprites.BLUE, 1)
+        screen.blit(face, face.get_rect(center=(scores_button.centerx, scores_button.centery - 2)))
+
+    def draw_scores():
+        """Today's fastest solo crossings, board by board."""
+        screen.fill((224, 239, 241))
+        text_line("TODAY'S BEST TIMES", 20, True)
+        for index, layout in enumerate(BOARDS):
+            panel = pygame.Rect(0, 0, 580, 124)
+            panel.center = (width // 2 + (index % 2 * 2 - 1) * 305, 210 + index // 2 * 138)
+            pygame.draw.rect(screen, sprites.BLUE, panel.inflate(8, 8), border_radius=26)
+            pygame.draw.rect(screen, sprites.WHITE, panel, border_radius=22)
+            title = sprites.lettering(layout['name'], 30, sprites.BLUE_BRIGHT, 1)
+            screen.blit(title, title.get_rect(midleft=(panel.x + 22, panel.y + 26)))
+            rows = scores.top(layout['name'], 3)
+            if not rows:
+                empty = sprites.lettering('nobody yet - be the first', 24, sprites.tint(sprites.BLUE, .5))
+                screen.blit(empty, empty.get_rect(midleft=(panel.x + 22, panel.y + 74)))
+            for place, (name, seconds) in enumerate(rows):
+                y = panel.y + 56 + place * 24 if len(rows) > 1 else panel.y + 74
+                for words, x, anchor in ((f'{place + 1}.  {name}', panel.x + 22, 'midleft'), (f'{seconds:.2f} s', panel.right - 22, 'midright')):
+                    image = sprites.lettering(words, 24 if place else 26, sprites.BLUE)
+                    screen.blit(image, image.get_rect(**{anchor: (x, y)}))
+        image = sprites.sign('Solo Dash times, wiped at midnight.  Press any key to go back.', 24, sprites.BLUE_BRIGHT)
+        screen.blit(image, image.get_rect(center=(width // 2, 700)))
 
     def draw_info():
         """How to play, with the numbers read from the rules actually in force."""
@@ -348,9 +393,9 @@ def main():
             ('2  RACE', ('Your beaver only walks while your laser traces the line just ahead of it' if not args.simulate
                          else 'Your beaver only walks while the mouse traces the line just ahead of it',
                          'A rock on your line stops you there for good, so draw round them',
-                         'Ponds are allowed but you swim at half speed',
+                         'Ponds are allowed: you swim a bit slower, so a short swim can beat a long detour',
                          ('Right click' if args.simulate else 'Button 2') + f": a {rules['boost_seconds']:g} s speed boost, ready again after {rules['boost_cooldown']:g} s",
-                         'First beaver to the chest wins')),
+                         'First beaver to the chest wins' if not (treasure.solo) else "Reach the chest as fast as you can: today's best times are kept per board")),
         )
         y = 170
         for heading, lines in sections:
@@ -388,7 +433,7 @@ def main():
                         naming, typed = naming + 1, ''
                         if naming >= len(ids):
                             game.names, naming = dict(names), 0
-                            if chosen == 'treasure':
+                            if chosen in ('treasure', 'solo'):
                                 mode, menu_message = start_chosen()
                             elif args.simulate:
                                 game.new_match(ids, walls)
@@ -400,6 +445,10 @@ def main():
                     elif event.unicode and event.unicode.isprintable() and len(typed) < 10:
                         typed = (typed + event.unicode.upper()).lstrip()
                     continue
+                if mode == 'scores':
+                    if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                        mode = 'home'
+                    continue
                 if mode == 'home':
                     picked = False
                     if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
@@ -407,14 +456,20 @@ def main():
                             if rect.collidepoint(event.pos):
                                 home_pick = index
                                 picked = event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and scores_button.collidepoint(event.pos):
+                        mode = 'scores'
+                        continue
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_b:
+                        mode = 'scores'
+                        continue
                     if event.type == pygame.KEYDOWN and event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_UP, pygame.K_TAB):
-                        home_pick = 1 - home_pick
+                        home_pick = (home_pick + (-1 if event.key in (pygame.K_LEFT, pygame.K_UP) else 1)) % len(games)
                     if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                         picked = True
                     if picked:
-                        chosen = ('battle', 'treasure')[home_pick]
-                        if chosen == 'treasure' or args.simulate:
-                            ids = [1, 2] if chosen == 'treasure' else list(range(1, config['game']['players'] + 1))
+                        chosen = games[home_pick]
+                        if chosen != 'battle' or args.simulate:
+                            ids = [1] if chosen == 'solo' else [1, 2] if chosen == 'treasure' else list(range(1, config['game']['players'] + 1))
                             naming, typed = 0, ''
                             mode, menu_message = ('names', '') if ask_names else start_chosen()
                         else:
@@ -435,11 +490,17 @@ def main():
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and playing and active_game().phase == 'match_over':
                     if again_button.collidepoint(event.pos):
                         again = True
+                    elif mode == 'treasure' and treasure.solo and next_button.collidepoint(event.pos):
+                        solo_board = (treasure.board_index + 1) % len(BOARDS)
+                        again = True
                     elif menu_button.collidepoint(event.pos):
                         mode, selection = ('home' if mode == 'treasure' else 'lobby'), 0
                         continue
                 if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and playing and active_game().phase == 'match_over':
                     again = True
+                    continue
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_n and mode == 'treasure' and treasure.solo and treasure.phase == 'match_over':
+                    solo_board, again = (treasure.board_index + 1) % len(BOARDS), True
                     continue
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and (playing or mode == 'pause'):
                     if pause_button.collidepoint(event.pos):
@@ -526,12 +587,12 @@ def main():
                 both_since = None
             if mode == 'home' and (cycle or (confirm and not key_confirm)):
                 if cycle:
-                    home_pick = 1 - home_pick
+                    home_pick = (home_pick + 1) % len(games)
                 else:
-                    chosen = ('battle', 'treasure')[home_pick]
-                    ids = [1, 2] if chosen == 'treasure' else ids
+                    chosen = games[home_pick]
+                    ids = [1] if chosen == 'solo' else [1, 2] if chosen == 'treasure' else ids
                     naming, typed = 0, ''
-                    mode, menu_message = (('names', '') if ask_names else start_chosen()) if chosen == 'treasure' else ('lobby', '')
+                    mode, menu_message = (('names', '') if ask_names else start_chosen()) if chosen != 'battle' else ('lobby', '')
             if mode in ('lobby', 'pause'):
                 choices = menu_choices(mode)
                 if cycle:
@@ -625,6 +686,13 @@ def main():
                     board.play(treasure.sounds)
                     treasure.sounds.clear()
                     accumulator -= 1 / 60
+                if treasure.phase != 'match_over':
+                    recorded = False
+                elif treasure.solo and treasure.winner is not None and not recorded:
+                    # A finished solo run goes on today's board for this layout, once.
+                    recorded, solo_board = True, treasure.board_index
+                    treasure.rank = scores.record(treasure.board['name'], treasure.name(treasure.winner), treasure.race_time)
+                    treasure.standings = scores.top(treasure.board['name'])
                 if treasure.phase == 'match_over' and (again or (cycle and not key_cycle)):
                     mode, menu_message = start_chosen()
                 elif treasure.phase == 'match_over' and confirm:
@@ -662,11 +730,20 @@ def main():
                 draw_info()
             elif mode == 'home':
                 draw_home()
+            elif mode == 'scores':
+                draw_scores()
             elif mode in ('game', 'countdown', 'treasure'):
                 active_game().draw(screen)
                 if mode in ('game', 'treasure') and active_game().phase == 'match_over':
-                    hints = (('PLAY AGAIN', 'Enter', again_button), ('MENU', 'Space', menu_button)) if args.simulate else (
-                        ('PLAY AGAIN', 'button 1', again_button), ('MENU', 'button 2', menu_button))
+                    solo_over = mode == 'treasure' and treasure.solo
+                    # Solo gets three: the same board again, the next board, or out.
+                    again_button.center = (width // 2 - (330 if solo_over else 170), height - 96)
+                    next_button.center = (width // 2, height - 96)
+                    menu_button.center = (width // 2 + (300 if solo_over else 210), height - 96)
+                    hints = [('RETRY' if solo_over else 'PLAY AGAIN', 'Enter' if args.simulate else 'button 1', again_button)]
+                    if solo_over:
+                        hints.append(('NEXT BOARD', 'N', next_button))
+                    hints.append(('MENU', 'Space' if args.simulate else 'button 2', menu_button))
                     for words, how, button in hints:
                         hover = button.collidepoint(pygame.mouse.get_pos())
                         pygame.draw.rect(screen, sprites.WHITE, button.inflate(10, 10), border_radius=36)

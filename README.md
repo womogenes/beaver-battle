@@ -1,5 +1,7 @@
 # Beaver Battle
 
+![Beaver Battle: two whiteboard games played with laser pointers](docs/thumbnail.png)
+
 A projection-mapped canoe battle for two or three red-laser controllers. Python runs the game, USB camera, calibration, and UDP networking. ESP-IDF C runs the two buttons, laser output, and servo feedback on each ESP32 DevKit V1.
 
 ## Run now, without hardware
@@ -22,9 +24,9 @@ uv run python -m beaver_battle --headless --seconds 60 --screenshot /tmp/beaver-
 
 ## Two games
 
-The launcher opens on a chooser: **Beaver Battle** (the canoe fight described here) or **Treasure Dash**. `--game battle` or `--game treasure` skips the chooser, and both menus have a Change game button.
+The launcher opens on a chooser: **Beaver Battle** (the canoe fight described here), **Treasure Dash**, or **Solo Dash**. `--game battle`, `--game treasure` or `--game solo` skips the chooser, and both menus have a Change game button.
 
-**Treasure Dash** is for two players. A chest sits in the middle of a meadow of rocks and ponds. Each player has 30 seconds to draw a path from their corner to the chest: with a marker on the whiteboard, read by the same camera mask as Beaver Battle's walls, or with the cursor in simulation (hold the left button; right click when done). Breaks up to `merge_gap` pixels are joined; a path that never reaches the chest loses on the spot. Then the race: a beaver only walks while its player's laser traces the line just ahead of it, a rock on the line stops it there for good, ponds are crossed at half speed by swimming, and button 2 gives a short speed boost on a cooldown. First to the chest wins. There are eight boards, each mirrored so both players face the same puzzle, and a race is tuned to last about half a minute. In simulation player 2 is a bot that draws and traces its own path, since there is one mouse. Settings live under `[treasure]` in `config.toml`; `checks/check_treasure.py` covers the rules. Only the simulated, cursor-drawn game has been played; drawing with real markers under the camera is untested.
+**Treasure Dash** is for two players. A chest sits in the middle of a meadow of rocks and ponds. Each player has 30 seconds to draw a path from their corner to the chest: with a marker on the whiteboard, read by the same camera mask as Beaver Battle's walls, or with the cursor in simulation (hold the left button; right click when done). Breaks up to `merge_gap` pixels are joined; a path that never reaches the chest loses on the spot. Then the race: a beaver only walks while its player's laser traces the line just ahead of it, a rock on the line stops it there for good, ponds are crossed more slowly by swimming, and button 2 gives a short speed boost on a cooldown. First to the chest wins. There are eight boards, each mirrored so both players face the same puzzle, and a race is tuned to last about ten seconds. In simulation player 2 is a bot that draws and traces its own path, since there is one mouse. **Solo Dash** is the same game for one player against the clock: the beaver starts at one edge and the chest sits at the other, so the path crosses the whole board. A finished run goes on today's leaderboard for that board (`leaderboard.json`, ignored by git and wiped when the date changes); the result screen shows today's table with RETRY, NEXT BOARD and MENU, and the chooser has a Today's best times page. Races are tuned to about ten seconds, swimming is 70% of walking speed so a short swim can beat a long detour, and rocks and ponds are scattered small. Settings live under `[treasure]` in `config.toml`; `checks/check_treasure.py` covers the rules. Only the simulated, cursor-drawn game has been played; drawing with real markers under the camera is untested.
 
 ## Connect the physical game
 
