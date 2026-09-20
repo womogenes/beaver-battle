@@ -68,6 +68,45 @@ def art(name):
     return art_cache[name]
 
 
+def typeface(size):
+    """Lilita One, the chunky display face; pygame's default if the file is missing."""
+    key = ("typeface", size)
+    if key not in art_cache:
+        if not pygame.font.get_init():
+            pygame.font.init()
+        path = ASSETS / "fonts" / "LilitaOne-Regular.ttf"
+        art_cache[key] = pygame.font.Font(path if path.is_file() else None, size)
+    return art_cache[key]
+
+
+def label(message, size, fill=WHITE, ink=INK, tilt=0):
+    """Sticker lettering: a fat outline all round and a solid block of shadow underneath.
+
+    The fill must be a pastel: black outlines would read as walls and red letters as laser dots.
+    """
+    key = ("label", message, size, fill, ink, tilt)
+    if key not in art_cache:
+        if sum(1 for name in art_cache if name[0] == "label") > 300:
+            for name in [name for name in art_cache if name[0] == "label"]:
+                del art_cache[name]
+        edge, drop = max(2, round(size * .085)), max(2, round(size * .12))
+        try:
+            face, shade = typeface(size).render(message, True, fill), typeface(size).render(message, True, ink)
+        except pygame.error:
+            # pygame was quit and restarted since the font was opened; reopen it.
+            del art_cache[("typeface", size)]
+            face, shade = typeface(size).render(message, True, fill), typeface(size).render(message, True, ink)
+        outline = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
+        for step in range(24):
+            outline.blit(shade, (edge + edge * math.cos(step * math.tau / 24), edge + edge * math.sin(step * math.tau / 24)))
+        image = pygame.Surface((outline.get_width(), outline.get_height() + drop), pygame.SRCALPHA)
+        for fall in range(drop + 1):
+            image.blit(outline, (0, fall))
+        image.blit(face, (edge, edge))
+        art_cache[key] = pygame.transform.rotozoom(image, tilt, 1) if tilt else image
+    return art_cache[key]
+
+
 def fitted(image, long_side, degrees=0, flip=False):
     if flip:
         image = pygame.transform.flip(image, True, False)

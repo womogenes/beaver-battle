@@ -118,6 +118,7 @@ def main():
                         help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
+    parser.add_argument('--mute', action='store_true', help='play no sound effects')
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
     args = parser.parse_args()
     config = load_config(args.config)
@@ -197,9 +198,16 @@ def main():
     feedback_count = 0
     game.new_match(ids, walls)
 
-    def text_line(text, y, large=False, color=(90, 105, 135)):
-        surface = (title_font if large else font).render(text, True, color)
-        screen.blit(surface, ((width - surface.get_width()) // 2, y))
+    from beaver_battle.sound import SoundBoard
+    sound = config.get('sound', {})
+    board = SoundBoard(sound.get('enabled', True) and not args.mute and not args.headless, sound.get('volume', .6))
+
+    def text_line(text, y, large=False, color=None):
+        from beaver_battle import sprites
+        selected = text.startswith('> ')
+        fill = color or (sprites.PINK_DARK if large else sprites.BUTTER if selected else sprites.WHITE)
+        surface = sprites.label(text[2:] if selected else text, 76 if large else 38 if selected else 32, fill, tilt=2 if large else 0)
+        screen.blit(surface, ((width - surface.get_width()) // 2, y - (14 if large else 0)))
 
     try:
         if not args.simulate:
@@ -332,6 +340,9 @@ def main():
                 accumulator += dt
                 while accumulator >= 1 / 60:
                     events = game.update(1 / 60, inputs, walls)
+                    if isinstance(game.sounds, list):
+                        board.play(game.sounds)
+                        game.sounds.clear()
                     feedback_count += len(events)
                     if not args.simulate:
                         bridge.feedback(events, now)

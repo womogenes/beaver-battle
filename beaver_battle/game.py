@@ -397,6 +397,7 @@ class Game:
     shore: float = 0.0
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
+    sounds: list[str] = field(default_factory=list)
     ink_art: object = None
     bridges: dict = field(default_factory=dict)
     wall_tick: int = 0
@@ -690,6 +691,7 @@ class Game:
             if target.state == "eliminated" or target.invulnerability > 0:
                 return False
             target.state = "beaver" if target.state == "canoe" else "eliminated"
+            self.sounds.append("hit" if target.state == "beaver" else "splash")
             target.radius = 10 * self.scale
             target.speed = self.setting("beaver_speed", 75) * self.scale
             target.invulnerability = self.setting("invulnerability", .8)
@@ -702,6 +704,7 @@ class Game:
             return True
         if isinstance(target, Prop) and target.hp > 0:
             target.hp -= damage
+            self.sounds.append("thud" if target.hp > 0 else "crack")
             if target.hp <= 0 and target.kind in ("barrel", "asteroid"):
                 if not self.drop_bag:
                     self.drop_bag = ["laser", "jouster", "mine"]
@@ -720,6 +723,7 @@ class Game:
 
     def shoot(self, owner, pos, heading, radius, ignore=None):
         forward = direction(heading)
+        self.sounds.append("shoot")
         start = pos + forward * (radius + 6 * self.scale)
         end, blocker = self.trace(pos, start, 4 * self.scale, owner=owner, ignore=ignore)
         if blocker is not None:
@@ -737,17 +741,21 @@ class Game:
                                      2 * self.scale, owner=player.player_id)
             self.hit(target, 3)
             self.effects.append(Effect("laser", player.pos.copy(), end, .15))
+            self.sounds.append("laser")
         elif kind == "jouster":
             player.joust = 2.0
+            self.sounds.append("powerup")
         elif kind == "mine":
             pos = self.nearest_free(player.pos - direction(player.heading) * 32 * self.scale, 9 * self.scale)
             if pos is None:
                 return
             self.mines.append(Mine(player.player_id, pos, 9 * self.scale))
+            self.sounds.append("drop")
         player.powerup = None
 
     def explode(self, mine):
         mine.active = False
+        self.sounds.append("boom")
         radius = 90 * self.scale
         self.effects.append(Effect("explosion", mine.pos.copy(), pygame.Vector2(radius, 0), .3))
         targets = [player for player in self.players.values()
@@ -765,6 +773,7 @@ class Game:
         if not math.isfinite(dt) or not 0 <= dt <= 10:
             raise ValueError("Game dt must be finite and between zero and ten seconds")
         self.events = []
+        del self.sounds[:-32]
         if walls is not None and self.replace_walls(walls):
             self.resolve_walls()
         if self.blocked or self.phase == "match_over":
@@ -798,6 +807,7 @@ class Game:
                 player.reload = countdown(player.reload, dt)
                 if player.reload == 0:
                     player.ammo = self.setting("magazine", 3)
+                    self.sounds.append("reload")
             if player.bounce > 0:
                 player.bounce = countdown(player.bounce, dt)
                 player.heading = turn_toward(player.heading, player.bounce_heading, math.radians(720) * dt)
@@ -817,6 +827,8 @@ class Game:
             velocity = direction(player.heading) * player.speed * (1.5 if player.joust else 1)
             rebound = self.move(player, velocity, dt)
             if rebound != velocity and rebound.length_squared():
+                if player.bounce == 0:
+                    self.sounds.append("bump")
                 # Glance off smoothly: slide along the obstacle while the bow swings round to the rebound heading.
                 player.bounce = .3
                 player.bounce_heading = math.atan2(rebound.y, rebound.x)
@@ -834,6 +846,7 @@ class Game:
                 end, target = self.trace(player.pos, player.pos + direction(player.heading) * 54 * self.scale,
                                          7 * self.scale, owner=player.player_id)
                 if target is not None and target != "wall":
+                    self.sounds.append("ram")
                     self.hit(target, 3)
                     player.joust = 0
         for prop in self.props:
@@ -849,6 +862,7 @@ class Game:
             if self.winner is not None:
                 self.scores[self.winner] += 1
             self.phase = "match_over" if self.winner is not None and self.scores[self.winner] >= self.setting("winning_score", 5) else "round_over"
+            self.sounds.append("fanfare" if self.phase == "match_over" else "win")
             self.round_timer = self.setting("round_delay", 3)
 
     def update_rocks(self, dt):
@@ -909,6 +923,7 @@ class Game:
             for player in self.players.values():
                 if player.state == "canoe" and player.powerup is None and player.pos.distance_to(pickup.pos) <= player.radius + pickup.radius:
                     player.powerup = pickup.kind
+                    self.sounds.append("pickup")
                     collected = True
                     break
             if not collected and pickup.lifetime > 0:
@@ -932,15 +947,9 @@ class Game:
                     break
         self.mines = [mine for mine in self.mines if mine.active]
 
-    def text(self, surface, message, position, size=20, color=INK, centered=False):
-        size = max(12, round(size * self.scale))
-        if size not in self.fonts:
-            if not pygame.font.get_init():
-                pygame.font.init()
-            self.fonts[size] = pygame.font.Font(None, size)
-        image = self.fonts[size].render(str(message), True, color)
-        rect = image.get_rect(center=position) if centered else image.get_rect(topleft=position)
-        surface.blit(image, rect)
+    def text(self, surface, message, position, size=20, color=None, centered=False, tilt=0):
+        image = sprites.label(str(message), max(12, round(size * self.scale)), color or sprites.WHITE, tilt=tilt)
+        surface.blit(image, image.get_rect(center=position) if centered else image.get_rect(topleft=position))
 
     def font(self, size):
         if size not in self.fonts:
@@ -1066,7 +1075,7 @@ class Game:
             tag = player.pos + pygame.Vector2(0, -player.radius * 2 - 14 * unit)
             pygame.draw.circle(surface, INK, tag, 11 * unit)
             pygame.draw.circle(surface, sprites.tint(color, .45), tag, 8.5 * unit)
-            self.text(surface, str(player.player_id), tag, 19, centered=True)
+            self.text(surface, str(player.player_id), tag - pygame.Vector2(0, unit), 17, centered=True)
             if player.powerup:
                 self.stamp(surface, self.sprite(("held", player.powerup), lambda: sprites.pickup(9 * unit, player.powerup)), tag + pygame.Vector2(24 * unit, 0))
             if player.state == "canoe":
@@ -1091,7 +1100,7 @@ class Game:
             x, y = left + index * (group + 34 * unit), 28 * unit
             pygame.draw.circle(surface, INK, (x + 15 * unit, y), 15 * unit)
             pygame.draw.circle(surface, sprites.tint(color, .35), (x + 15 * unit, y), 12 * unit)
-            self.text(surface, str(player.player_id), (x + 15 * unit, y), 24, centered=True)
+            self.text(surface, str(player.player_id), (x + 15 * unit, y - unit), 22, centered=True)
             for point in range(goal):
                 center = (x + (50 + point * 22) * unit, y)
                 pygame.draw.circle(surface, INK, center, 9 * unit)
@@ -1101,7 +1110,8 @@ class Game:
             pygame.draw.rect(surface, sprites.CREAM, box, border_radius=max(1, round(22 * unit)))
             pygame.draw.rect(surface, INK, box, max(1, round(4 * unit)), border_radius=max(1, round(22 * unit)))
             message = self.error if self.blocked else (f"PLAYER {self.winner} WINS!" if self.winner is not None else "DRAW")
-            self.text(surface, message, (self.width / 2, self.height * .45), 44, centered=True)
+            fill = COLORS[self.winner - 1] if self.winner is not None and not self.blocked else sprites.BUTTER
+            self.text(surface, message, (self.width / 2, self.height * .45), 58, fill, centered=True, tilt=2)
             subtitle = "Erase or move a physical obstacle" if self.blocked else (
                 "First to five! Return to lobby to play again" if self.phase == "match_over" else f"Next round in {max(1, math.ceil(self.round_timer))}")
-            self.text(surface, subtitle, (self.width / 2, self.height * .53), 23, centered=True)
+            self.text(surface, subtitle, (self.width / 2, self.height * .55), 26, centered=True)

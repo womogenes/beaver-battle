@@ -76,3 +76,7 @@ seed = 2026
 [feedback]
 enabled = true
 duration_ms = 200
+
+[sound]
+enabled = true
+volume = 0.6
