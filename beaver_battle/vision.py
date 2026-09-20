@@ -245,7 +245,10 @@ def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180,
     """
     blue, green, red = cv2.split(frame)
     redness = red.astype(np.int16) - np.maximum(blue, green).astype(np.int16)
-    mask = ((red >= int(red_min)) & (redness >= int(redness_min))).astype(np.uint8)
+    # This Arducam renders a saturated red laser magenta: measured BGR
+    # (253, 219, 255). Requiring red above blue discards its bright core.
+    magenta = (red >= 230) & (red.astype(np.int16) - green >= int(redness_min))
+    mask = ((red >= int(red_min)) & ((redness >= int(redness_min)) | magenta)).astype(np.uint8)
     if merge and int(merge) > 1:
         # One dot arrives as a bright core with speckle around it, and those pieces sit a
         # few pixels apart: measured, every frame carrying more than one piece had them
@@ -256,8 +259,18 @@ def laser_candidates(frame, matrix, width, height, min_area=1, max_area=180,
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
                                 cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)))
     count, labels, stats, centers = cv2.connectedComponentsWithStats(mask, 8)
-    points = [centers[index] for index in range(1, count)
-              if min_area <= stats[index, cv2.CC_STAT_AREA] <= max_area]
+    points = []
+    for index in range(1, count):
+        x, y, w, h, area = stats[index]
+        if not min_area <= area <= max_area:
+            continue
+        # Projected brown sprites are redder, but darker, than the board.
+        # A physical laser adds light. Compare its peak with nearby board,
+        # preserving the faint measured dot (197 against 162) as well.
+        surrounding = red[max(0, y - 8):y + h + 8, max(0, x - 8):x + w + 8]
+        component = red[y:y + h, x:x + w][labels[y:y + h, x:x + w] == index]
+        if int(component.max()) - float(np.median(surrounding)) >= 20:
+            points.append(centers[index])
     if not points:
         return []
     transformed = cv2.perspectiveTransform(np.float32(points)[None], matrix)[0]

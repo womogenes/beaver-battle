@@ -1182,6 +1182,7 @@ def main():
                 args.diagnostics_dir.mkdir(parents=True, exist_ok=True)
                 if snapshot.preview is not None:
                     cv2.imwrite(str(args.diagnostics_dir / 'camera.jpg'), snapshot.preview)
+                    cv2.imwrite(str(args.diagnostics_dir / 'camera.png'), snapshot.preview)
                 if snapshot.walls is not None:
                     cv2.imwrite(str(args.diagnostics_dir / 'walls.png'), snapshot.walls.astype(np.uint8) * 255)
                 if game.match_walls is not None:
@@ -1190,6 +1191,9 @@ def main():
                     cv2.imwrite(str(args.diagnostics_dir / 'match-solid.png'), game.walls.astype(np.uint8) * 255)
                 diagnostic = dict(mode=mode, calibrated=snapshot.calibrated, error=snapshot.error,
                     controllers=active_ids, aims=dict(snapshot.aims),
+                    radio_controllers=bridge.active_ids(now) if not forced and not args.bench else [],
+                    laser_states={player: bridge.controllers[player].laser for player in bridge.active_ids(now)}
+                        if not forced and not args.bench else {},
                     confidence=dict(snapshot.confidence),
                     frame_age=max(0.0, now - snapshot.timestamp),
                     buttons={player: dict(fire=value.fire, special=value.special)

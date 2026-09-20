@@ -340,6 +340,17 @@ def check_laser_on_a_whiteboard():
     assert not laser_candidates(faint, np.eye(3), 640, 480, redness_min=60), \
         "The old threshold is what missed it"
 
+    # Bright-room Arducam measurements: blue clips alongside red in the
+    # physical dot, while projected brown art is darker than the board.
+    magenta = board.copy()
+    cv2.circle(magenta, (300, 240), 3, (253, 219, 255), -1)
+    cv2.circle(magenta, (450, 240), 3, (121, 143, 168), -1)
+    spots = laser_candidates(magenta, np.eye(3), 640, 480)
+    assert len(spots) == 1 and math.dist(spots[0], (300, 240)) < 1
+    glare = board.copy()
+    cv2.circle(glare, (300, 240), 3, (255, 255, 255), -1)
+    assert not laser_candidates(glare, np.eye(3), 640, 480), "Neutral glare is not a dot"
+
     # One dot arrives in pieces, and pieces a few pixels apart read as an unusable merge.
     split = board.copy()
     for at in ((400, 200), (406, 203), (398, 208)):
