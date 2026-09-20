@@ -109,7 +109,7 @@ class SoundBoard:
     """Plays named effects through pygame.mixer; silent, never failing, when there is no audio device."""
 
     def __init__(self, enabled=True, volume=.42, music=.75):
-        self.sounds = {}
+        self.sounds, self.music, self.playing = {}, 0.0, None
         if not enabled:
             return
         import pygame
@@ -128,15 +128,28 @@ class SoundBoard:
         except (pygame.error, NotImplementedError, ValueError):
             self.sounds = {}
             return
-        theme = Path(__file__).resolve().parents[1] / "assets" / "music" / "theme.ogg"
-        if music > 0 and theme.is_file():
-            # Made by checks/build_music.py; it loops without a seam and sits under the effects.
-            try:
-                pygame.mixer.music.load(theme)
-                pygame.mixer.music.set_volume(music)
-                pygame.mixer.music.play(-1, fade_ms=1500)
-            except pygame.error:
-                pass
+        self.music = music
+        self.track("theme")
+
+    def track(self, name):
+        """Each game has its own music, assets/music/NAME.ogg, made by checks/build_music.py to loop without a seam
+        and sit under the effects. Asking for what is already playing does nothing; a missing file falls back to
+        the theme."""
+        if not self.sounds or self.music <= 0 or name == self.playing:
+            return
+        import pygame
+        from pathlib import Path
+        folder = Path(__file__).resolve().parents[1] / "assets" / "music"
+        self.playing = name
+        for choice in (name, "theme"):
+            if (folder / f"{choice}.ogg").is_file():
+                try:
+                    pygame.mixer.music.load(folder / f"{choice}.ogg")
+                    pygame.mixer.music.set_volume(self.music)
+                    pygame.mixer.music.play(-1, fade_ms=1200)
+                except pygame.error:
+                    pass
+                return
 
     def play(self, names):
         for name in dict.fromkeys(names):
