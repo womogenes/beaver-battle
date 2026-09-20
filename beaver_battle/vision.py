@@ -33,7 +33,7 @@ WALL_CONTRAST = 20
 WALL_FAINT = 9
 WALL_STROKE = 21
 LASER_RED_MIN = 160
-LASER_REDNESS = 25
+LASER_REDNESS = 16
 LASER_MERGE = 13
 OBSTACLE_THRESHOLD = 40
 OBSTACLE_MIN_AREA = 900
@@ -156,11 +156,18 @@ def homography(found, width, height):
         return None
     source = np.concatenate([found[number] for number in usable])
     destination = np.concatenate([layout[number] for number in usable])
-    matrix, inliers = cv2.findHomography(source, destination, cv2.RANSAC, 3.0)
-    if matrix is None or inliers is None or int(inliers.sum()) < 4 * len(usable) - 2:
+    # A wide lens does not photograph a plane as a plane, so markers spread across the
+    # frame cannot all sit on one homography. Measured on the mounted Arducam, a good
+    # mapping still leaves a median corner error near 1.3 px and a worst corner near 7.
+    # These limits are here to reject a mapping built from mismatched markers, which is
+    # wrong by tens of pixels, not to demand a fit the optics cannot deliver.
+    matrix, inliers = cv2.findHomography(source, destination, cv2.RANSAC, 6.0)
+    if matrix is None or inliers is None or int(inliers.sum()) < max(12, len(source) * 3 // 5):
         return None
-    projected = cv2.perspectiveTransform(source[None], matrix)[0]
-    if not np.isfinite(matrix).all() or np.max(np.linalg.norm(projected - destination, axis=1)) > 5:
+    if not np.isfinite(matrix).all():
+        return None
+    error = np.linalg.norm(cv2.perspectiveTransform(source[None], matrix)[0] - destination, axis=1)
+    if np.median(error) > 4.0 or error.max() > 15.0:
         return None
     if abs(np.linalg.det(matrix)) < 1e-9:
         return None
