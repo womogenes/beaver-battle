@@ -516,3 +516,9 @@ and laser behavior are unchanged. This is off by default and was enabled for
 controller 2's requested pin-isolation test. Prefer GPIO18; GPIO5 and GPIO15
 also have boot-strapping roles. Connect the servo signal to one pin at a time,
 not multiple ESP32 outputs together.
+
+Controller 2's latest requested calibration is reversed: set
+`CONFIG_BB_SERVO_REST_US=570` and `CONFIG_BB_SERVO_PRESS_US=990` in its local
+build configuration. Controller 1 remains rest 990 / press 570. Both retain
+500 ms phases and idle PWM shutdown. This records the requested direction;
+physical dispensing must be checked after flashing the affected board.
