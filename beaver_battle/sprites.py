@@ -80,7 +80,7 @@ def typeface(size):
 
 
 def label(message, size, fill=WHITE, ink=INK, tilt=0):
-    """Sticker lettering: a fat outline all round and a solid block of shadow underneath.
+    """Sticker lettering: glossy two-tone letters, a white rim, a fat outline and a solid block of shadow.
 
     The fill must be a pastel: black outlines would read as walls and red letters as laser dots.
     """
@@ -89,20 +89,38 @@ def label(message, size, fill=WHITE, ink=INK, tilt=0):
         if sum(1 for name in art_cache if name[0] == "label") > 300:
             for name in [name for name in art_cache if name[0] == "label"]:
                 del art_cache[name]
-        edge, drop = max(2, round(size * .085)), max(2, round(size * .12))
+        big = size >= 30
+        rim = max(2, round(size * .045)) if big else 0
+        edge, drop = rim + max(2, round(size * .085)), max(2, round(size * (.16 if big else .12)))
         try:
-            face, shade = typeface(size).render(message, True, fill), typeface(size).render(message, True, ink)
+            renders = [typeface(size).render(message, True, color) for color in (fill, ink, WHITE, tint(fill, .5))]
         except pygame.error:
             # pygame was quit and restarted since the font was opened; reopen it.
             del art_cache[("typeface", size)]
-            face, shade = typeface(size).render(message, True, fill), typeface(size).render(message, True, ink)
-        outline = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
-        for step in range(24):
-            outline.blit(shade, (edge + edge * math.cos(step * math.tau / 24), edge + edge * math.sin(step * math.tau / 24)))
+            renders = [typeface(size).render(message, True, color) for color in (fill, ink, WHITE, tint(fill, .5))]
+        face, shade, white, shine = renders
+
+        def ringed(source, reach):
+            ring = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
+            for step in range(28):
+                ring.blit(source, (edge + reach * math.cos(step * math.tau / 28), edge + reach * math.sin(step * math.tau / 28)))
+            return ring
+
+        outline = ringed(shade, edge)
         image = pygame.Surface((outline.get_width(), outline.get_height() + drop), pygame.SRCALPHA)
         for fall in range(drop + 1):
             image.blit(outline, (0, fall))
+        if rim:
+            image.blit(ringed(white, rim), (0, 0))
         image.blit(face, (edge, edge))
+        if big and fill != WHITE:
+            # A lighter upper half, cut on a gentle slant, reads as gloss.
+            gloss = shine.copy()
+            cut = pygame.Surface(gloss.get_size(), pygame.SRCALPHA)
+            height = gloss.get_height()
+            pygame.draw.polygon(cut, (255, 255, 255, 255), [(0, 0), (gloss.get_width(), 0), (gloss.get_width(), height * .46), (0, height * .58)])
+            gloss.blit(cut, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            image.blit(gloss, (edge, edge))
         art_cache[key] = pygame.transform.rotozoom(image, tilt, 1) if tilt else image
     return art_cache[key]
 

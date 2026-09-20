@@ -1126,7 +1126,9 @@ class Game:
             self.juice = Juice(unit)
         juice = self.juice
         juice.step(self)
-        screen, surface = surface, self.sprite(("canvas",), lambda: pygame.Surface((self.width, self.height)))
+        # Compose off-screen in plain 24-bit RGB. A window's own surface can carry a transparency channel
+        # (it does on macOS); once that holds zeros, text blitted onto it shows its invisible box.
+        screen, surface = surface, self.sprite(("canvas",), lambda: pygame.Surface((self.width, self.height), 0, 24))
         surface.fill(WATER)
         for index, pad in enumerate(self.pads):
             image = self.sprite(("pad", index), lambda: sprites.lily_pad(16 * unit, degrees=index * 67, flower=index % 3 != 2))
@@ -1255,8 +1257,10 @@ class Game:
         juice.draw_over(surface)
         juice.draw_ghosts(surface, self.portrait)
         juice.draw_scores(surface)
-        juice.present(surface, screen)
-        surface = screen
+        frame = self.sprite(("frame",), lambda: pygame.Surface((self.width, self.height), 0, 24))
+        frame.fill(WATER)
+        juice.present(surface, frame)
+        surface = frame
         goal = self.setting("winning_score", 5)
         group = (46 + goal * 22) * unit
         left = self.width / 2 - (len(self.players) * group + (len(self.players) - 1) * 34 * unit) / 2
@@ -1287,3 +1291,4 @@ class Game:
             if juice.banner is None:
                 juice.banner, juice.banner_age = (f"PLAYER {self.winner}!" if self.winner else "DRAW!", juice.color(self.winner), self.phase == "match_over"), 1.0
             juice.draw_banner(surface, self)
+        screen.blit(frame, (0, 0))

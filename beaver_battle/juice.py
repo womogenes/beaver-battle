@@ -280,9 +280,15 @@ class Juice:
             return
         message, color, match = self.banner
         unit, age = self.scale, self.banner_age
-        slam = 1 + 2.2 * max(0, 1 - age / .16) ** 2 + .1 * math.sin(min(1, age / .4) * math.pi) * (age < .4)
-        title = sprites.label(message, max(24, round(168 * unit)), color, tilt=-4)
-        if slam > 1.01:
+        slam = 1 + 2.2 * max(0, 1 - age / .16) ** 2 + .1 * math.sin(min(1, age / .4) * math.pi) * (age < .4) + .025 * math.sin(age * 7) * (age >= .4)
+        # A slow sunburst behind the name, so it jumps off a plain white board.
+        middle, reach = pygame.Vector2(game.width / 2, game.height * .44), game.width * .38 * min(1, age / .25)
+        for ray in range(14):
+            start = age * .5 + ray * math.tau / 14
+            tips = [middle + pygame.Vector2(math.cos(start + bend), math.sin(start + bend) * .5) * reach for bend in (0, math.tau / 28)]
+            pygame.draw.polygon(surface, sprites.tint(color, .62) if ray % 2 else sprites.tint(sprites.BUTTER, .35), [middle, *tips])
+        title = sprites.label(message, max(24, round(176 * unit)), color, tilt=-4)
+        if abs(slam - 1) > .004:
             title = pygame.transform.rotozoom(title, 0, slam)
         center = (game.width / 2, game.height * .44 + 5 * unit * math.sin(age * 3))
         surface.blit(title, title.get_rect(center=center))
@@ -290,5 +296,5 @@ class Juice:
             text = "WINS THE MATCH!" if match else f"Next round in {max(1, math.ceil(game.round_timer))}"
             if message == "DRAW!":
                 text = "Nobody wins that one"
-            line = sprites.label(text, max(14, round((58 if match else 34) * unit)), sprites.WHITE, tilt=-4 if match else 0)
-            surface.blit(line, line.get_rect(center=(game.width / 2, game.height * .44 + 125 * unit)))
+            line = sprites.label(text, max(14, round((62 if match else 40) * unit)), sprites.WHITE, tilt=-4 if match else 0)
+            surface.blit(line, line.get_rect(center=(game.width / 2, game.height * .44 + 138 * unit)))
