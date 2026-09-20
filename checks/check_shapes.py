@@ -215,3 +215,15 @@ check_cost()
 print(f"Shape checks passed: {len(CASES)} whiteboard cases, broken strokes rejoined, "
       "everything solid is drawn, gap judged against shape size, solid fills, "
       "edge and size limits, cost")
+
+# Broad filled regions retain collision ink but must not trigger expensive thinning.
+from unittest.mock import patch
+solid = np.ones((HEIGHT, WIDTH), np.uint8)
+with patch.object(cv2.ximgproc, 'thinning', side_effect=AssertionError('Thinning a filled board')):
+    assert stroke_ends(solid) == []
+mixed = blank()
+cv2.rectangle(mixed, (20, 20), (400, 400), 1, -1)
+cv2.line(mixed, (600, 450), (850, 450), 1, 3)
+assert len(stroke_ends(mixed)) == 2, 'Separate thin strokes still supply repair ends'
+assert mixed[100, 100] == 1, 'Repair filtering must not erase filled collision geometry'
+print('Dense-mask repair avoids thinning solid regions while retaining thin-stroke ends')

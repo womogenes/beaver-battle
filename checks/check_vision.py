@@ -125,7 +125,13 @@ def check_ink():
     bright = cv2.cvtColor(np.full((height, width), 190, np.uint8), cv2.COLOR_GRAY2BGR)
     assert not ink_mask(bright).any(), "A blank bright board holds no ink"
     dark_room = cv2.cvtColor(np.full((height, width), 40, np.uint8), cv2.COLOR_GRAY2BGR)
-    assert ink_mask(dark_room).all(), "The absolute cutoff still covers areas wider than the kernel"
+    assert not ink_mask(dark_room).any(), "A uniformly dim board is not solid ink"
+    for level in (8, 15, 40, 100, 200):
+        dim = np.full((height, width, 3), level, np.uint8)
+        dim[200:400, 400:600] = 0
+        detected = ink_mask(dim)
+        assert detected[250:350, 450:550].all(), "Wide dark ink remains solid"
+        assert detected.mean() < .06, "Blank field must not flood at any brightness"
     red = np.zeros((height, width, 3), np.uint8)
     red[:, :, 2] = 255
     assert not ink_mask(red).any(), "Saturated red stays reserved for laser dots"

@@ -215,3 +215,24 @@ A paired 25-sample sparse-board geometry benchmark reduced median collision
 geometry rebuild time from 90.54 to 50.44 ms (p90 98.68 to 53.68 ms). Dense ink
 can still require nearly the whole board; this optimization preserves the full
 search margins rather than changing which gaps become solid.
+
+### Dim-scene geometry stall fix (2026-09-20)
+
+A live underexposed image marked roughly 65% of the board as ink, sending broad
+filled regions into iterative stroke thinning on the game thread. The absolute
+ink cutoff is now capped at 35% of the sampled 75th-percentile red intensity;
+local contrast detection remains active. Uniform dim fields therefore do not
+become solid walls merely because their brightness falls below a room-specific
+constant. Checks cover blank fields and broad black ink at five light levels.
+
+Stroke endpoint repair excludes connected regions containing an interior wider
+than 60 pixels at the standard look setting. Their original collision ink is
+preserved; only speculative gap repair is skipped. Thin independent strokes
+still receive endpoint repair. This avoids expensive thinning of a filled board,
+without turning a physical obstacle into traversable space.
+
+The current room required a temporary manual exposure of 300 (nominally 30 ms)
+instead of the earlier room's 100. Recalibration at that exposure reduced the
+observed mask to about 7%. This is a room-specific hardware adjustment, not an
+automatic exposure policy or proof of robust tracking in every environment;
+longer exposure can increase motion blur. Recheck it after reconnecting the camera.

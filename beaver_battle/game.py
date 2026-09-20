@@ -154,7 +154,20 @@ def stroke_ends(ink, look=15, min_branch=25):
     right = min(ink.shape[1], left + width + pad)
     bottom = min(ink.shape[0], top + height + pad)
     left, top = max(0, left - pad), max(0, top - pad)
-    ends = stroke_ends_patch(ink[top:bottom, left:right], look, min_branch)
+    patch = ink[top:bottom, left:right]
+    # Broad filled objects/shadows are not broken pen strokes. Their skeleton
+    # costs hundreds of thinning passes and contributes no useful repair tips.
+    distance = cv2.distanceTransform(patch.astype(np.uint8), cv2.DIST_L2, 3)
+    thick = distance > max(12, look * 2)
+    if thick.any():
+        count, labels = cv2.connectedComponents(patch.astype(np.uint8), connectivity=8)
+        keep = np.ones(count, dtype=bool)
+        keep[0] = False
+        keep[np.unique(labels[thick])] = False
+        patch = keep[labels].astype(np.uint8)
+        if not patch.any():
+            return []
+    ends = stroke_ends_patch(patch, look, min_branch)
     return [((x + left, y + top), heading) for (x, y), heading in ends]
 
 

@@ -292,7 +292,11 @@ def ink_mask(warped, threshold=WALL_THRESHOLD, contrast=WALL_CONTRAST, stroke=WA
     size = max(3, int(stroke) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
     relief = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
-    solid = gray < int(threshold)
+    # A fixed cutoff must never classify a dim but blank board as solid ink.
+    # Sample the field cheaply; local contrast still handles individual strokes.
+    background = float(np.percentile(gray[::8, ::8], 75))
+    absolute = min(float(threshold), background * 0.35)
+    solid = gray < absolute
     strong = (relief >= int(contrast)) | solid
     if faint is None or int(faint) >= int(contrast):
         return strong
