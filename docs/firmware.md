@@ -204,6 +204,28 @@ The check exercises button bounce, exact lease expiry, out-of-order commands,
 feedback deduplication, pulse-duration limits, cooldown, reconnect/session
 handling, disabled feedback, sequence wrap, and servo jog direction/limits/hold.
 Physical pin timing, radio
+## Wireless controller from Arduino
+
+`firmware/arduino/controller_wifi_1` and `_2` speak PROTOCOL.md v1 over UDP, so button two
+reaches the laptop from a machine that has no ESP-IDF. The ESP-IDF build in `main/` is the
+real firmware and already sends both buttons; these exist only because Arduino cannot build
+it. Copy `secrets.example.h` to `secrets.h` in the sketch folder, which is not committed.
+
+They drive the laser locally from the button rather than from host commands, and always
+report `command_seq` as 0. That makes a lost command unable to leave a player unable to
+aim, at the cost of the host not being able to command the laser at all, so the identity
+scheduler cannot drive solo windows while this build is in use. Identity comes from the
+blink pattern instead, which is what it is for.
+
+**Which radio in a crowded room.** Both Wi-Fi and Bluetooth sit in the same congested
+2.4 GHz band, so choosing Bluetooth to dodge Wi-Fi congestion buys nothing. What buys
+reliability is not depending on the venue's network: run the hotspot from the laptop and
+point `secrets.h` at it. Venue Wi-Fi commonly isolates clients from one another, which
+stops a controller reaching the laptop even while the internet works, and that has already
+been seen on this project. ESP-NOW would be lower latency still but a laptop cannot speak
+it without a third ESP32 acting as a receiver. If the room defeats the radio entirely, the
+boards are already on USB for power and a serial link needs no radio at all.
+
 ## Identity blink bench test
 
 `BB_LASER_IDENTITY_TEST` drives the laser continuously with this controller's identity
