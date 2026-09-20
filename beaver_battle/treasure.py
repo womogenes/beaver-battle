@@ -156,6 +156,8 @@ class Deer:
     target: pygame.Vector2
     wait: float = 0.0
     facing: float = 1.0
+    pace: float = 0.0  # Current speed: a deer gathers itself, bounds, and eases to a stop.
+    hop: float = 0.0  # How far through the current bound it is, in bounds.
 
 
 @dataclass
@@ -203,6 +205,7 @@ class Treasure:
     deer: list = field(default_factory=list)
     matches: int = 0
     water: np.ndarray | None = None
+    shore: np.ndarray | None = None
     chest: pygame.Vector2 = field(default_factory=pygame.Vector2)
     runners: dict = field(default_factory=dict)
     drawing: list = field(default_factory=list)
@@ -255,6 +258,9 @@ class Treasure:
             # A duel is mirrored to the pixel, so neither side is favoured.
             layers.append(layer.astype(bool) if whole else layer.astype(bool) | layer.astype(bool)[:, ::-1])
         self.water = layers[0] & ~layers[1]
+        # Water plus a margin: what a deer, or a tree, treats as too close to the bank.
+        margin = round(30 * self.scale) | 1
+        self.shore = cv2.dilate(self.water.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (margin, margin))).astype(bool)
         self.portals = []
         for index, ((ax, ay), (bx, by)) in enumerate(self.board.get("portals", [])):
             for flip in ((False,) if whole else (False, True)):
@@ -285,7 +291,7 @@ class Treasure:
             for attempt in range(60):
                 point = pygame.Vector2(rng.uniform(.14, .86 if whole or everywhere else .5) * self.width, rng.uniform(.18, .92) * self.height)
                 crowded = any(point.distance_to(pad) < 100 * unit + reach for pad in pads) or any(point.distance_to(end) < 60 * unit + reach for a, b, index in self.portals for end in (a, b))
-                if not crowded and self.blocked_at(point, reach + 34 * unit) is None and not (dry and self.in_water(point)):
+                if not crowded and self.blocked_at(point, reach + 34 * unit) is None and not (dry and self.near_water(point)):
                     return point
             return None
 
@@ -353,6 +359,10 @@ class Treasure:
     def in_water(self, point):
         x, y = int(point.x), int(point.y)
         return 0 <= x < self.width and 0 <= y < self.height and bool(self.water[y, x])
+
+    def near_water(self, point):
+        x, y = int(point.x), int(point.y)
+        return not (0 <= x < self.width and 0 <= y < self.height) or bool(self.shore[y, x])
 
     def rock_at(self, point, slack=0.0):
         """Rocks are drawn rough, so a line may graze the edge of one and still get by."""
@@ -495,6 +505,7 @@ class Treasure:
         for deer in self.deer:
             if deer.wait > 0:
                 deer.wait -= dt
+                deer.pace, deer.hop = 0.0, 0.0
                 continue
             gap = deer.target - deer.pos
             if gap.length() < 3 * unit:
@@ -503,14 +514,21 @@ class Treasure:
                     angle, reach = self.rng.uniform(0, math.tau), self.rng.uniform(110, 340) * unit
                     target = deer.pos + pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
                     roomy = 60 * unit < target.x < self.width - 60 * unit and 100 * unit < target.y < self.height - 50 * unit
-                    way = [deer.pos.lerp(target, step / 8) for step in range(1, 9)]
-                    if roomy and not any(self.in_water(point) or self.blocked_at(point, 22 * unit) is not None for point in way) \
+                    paces = max(2, int(reach / (10 * unit)))  # Every 10 px, so no pond or rock slips between the samples.
+                    way = [deer.pos.lerp(target, step / paces) for step in range(1, paces + 1)]
+                    if roomy and not any(self.near_water(point) or self.blocked_at(point, 22 * unit) is not None for point in way) \
                             and all(target.distance_to(pad) > 90 * unit for pad in pads):
                         deer.target = target
                         break
                 continue
             deer.facing = 1 if gap.x >= 0 else -1
-            deer.pos += gap.normalize() * min(gap.length(), self.setting("deer_speed", 95) * unit * dt)
+            # Build up to full speed and slow for the last stretch, rather than starting and stopping dead.
+            top = self.setting("deer_speed", 80) * unit
+            wanted = top * min(1.0, .25 + gap.length() / (70 * unit))
+            deer.pace += max(-320 * unit * dt, min(260 * unit * dt, wanted - deer.pace))
+            step = min(gap.length(), deer.pace * dt)
+            deer.pos += gap.normalize() * step
+            deer.hop += step / (34 * unit)  # One bound for every 34 px covered, so the hops match the ground.
 
     def update_drawing(self, dt, inputs, ink):
         before = math.ceil(self.timer)
@@ -570,6 +588,12 @@ class Treasure:
                 # Winded by a deer: nothing to do but wait it out.
                 runner.stall = max(0.0, runner.stall - dt)
                 runner.shy = self.setting("deer_grace", 1.2)
+                continue
+            if runner.shy == 0 and any(deer.pos.distance_to(runner.pos) < 32 * self.scale for deer in self.deer):
+                # A collision is a collision whoever was moving: a deer bounding into a standing beaver winds it too.
+                runner.stall = self.setting("deer_stall", 2.0)
+                self.sounds.append("bleat")
+                self.sparkle(runner.pos, 18)
                 continue
             if runner.player_id in self.bots:
                 aim, special = self.bot_trace(runner, dt)
@@ -773,8 +797,18 @@ class Treasure:
         frame.blit(chest, chest.get_rect(center=self.chest + pygame.Vector2(0, -4 * unit * abs(math.sin(self.clock * 2.4)))))
         for deer in self.deer:
             image = self.sprite(("deer", deer.facing), lambda: pygame.transform.flip(sprites.deer(26 * unit), deer.facing < 0, False))
-            walking = deer.wait <= 0
-            frame.blit(image, image.get_rect(center=deer.pos + pygame.Vector2(0, -5 * unit * abs(math.sin(self.clock * 12 + deer.pos.x)) if walking else 0)))
+            effort = min(1.0, deer.pace / max(1.0, self.setting("deer_speed", 80) * unit))
+            lift = abs(math.sin(math.pi * deer.hop)) * 11 * unit * effort
+            # A shadow that shrinks as it leaves the ground, a lean into the run, and a breath while it stands.
+            shadow = pygame.Rect(0, 0, (34 - lift) * unit, (11 - lift * .35) * unit)
+            shadow.center = (deer.pos.x, deer.pos.y + 26 * unit)
+            pygame.draw.ellipse(frame, (132, 176, 140), shadow)
+            if effort > .05:
+                image = pygame.transform.rotozoom(image, -deer.facing * 9 * effort * math.cos(math.pi * deer.hop), 1)
+            else:
+                breath = 1 + .025 * math.sin(self.clock * 2.6 + id(deer) % 7)
+                image = pygame.transform.smoothscale(image, (image.get_width(), round(image.get_height() * breath)))
+            frame.blit(image, image.get_rect(midbottom=(deer.pos.x, deer.pos.y + 30 * unit - lift)))
         for runner in self.runners.values():
             self.draw_beaver(frame, runner, colors[runner.player_id])
         for x, y, vx, vy, life, size in self.particles:

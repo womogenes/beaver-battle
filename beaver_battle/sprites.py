@@ -735,3 +735,23 @@ def berries(size, zoom=1, color="red"):
         pen.ellipse(fill, (x, y), r, outline=edge, width=1.4)
         pen.ellipse(tint(fill, .6), (x - r * .35, y - r * .35), r * .3, outline=None)
     return pen.image()
+
+
+def lodge(size, zoom=1):
+    """A beaver lodge: a dome of piled sticks with a doorway, and someone at home."""
+    rng = random.Random(4)
+    pen = Pen(80, 72, size * zoom / 34, zoom)
+    pen.ellipse(BARK, (0, 6), 34, 26, outline=BARK_LINE, width=2)
+    for index in range(26):
+        x, y = rng.uniform(-28, 28), rng.uniform(-14, 26)
+        if (x / 32) ** 2 + ((y - 6) / 24) ** 2 < .9:
+            angle = rng.uniform(-.6, .6) + (math.pi / 2 if index % 5 == 0 else 0)
+            reach = rng.uniform(6, 11)
+            pen.line(BARK_LINE, (x - reach * math.cos(angle), y - reach * math.sin(angle)), (x + reach * math.cos(angle), y + reach * math.sin(angle)), 2.6)
+            pen.line(BARK_LIGHT, (x - reach * math.cos(angle), y - reach * math.sin(angle) - .6), (x + reach * math.cos(angle), y + reach * math.sin(angle) - .6), 1.2)
+    pen.ellipse(CHEST_DARK, (0, 20), 10, 9, outline=BARK_LINE, width=1.6)
+    pen.ellipse(FUR, (0, 21), 6.5, 5.5, outline=None)
+    for side in (-1, 1):
+        pen.ellipse(BEAVER_EYE, (side * 2.6, 20), 1.3, outline=None)
+    pen.poly(WHITE, [(-1.4, 23), (1.4, 23), (1.4, 25.6), (-1.4, 25.6)], FUR_LINE, .7)
+    return pen.image()

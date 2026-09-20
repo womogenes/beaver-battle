@@ -211,7 +211,16 @@ run(game, config["treasure"]["deer_stall"] - 1.2, lambda: tracing(game))
 assert left.travelled == stalled_at, "winded means no progress at all"
 run(game, 1.4, lambda: tracing(game))
 assert left.stall == 0 and left.travelled > 60, "after the stall the beaver pushes past the same deer"
+# A deer that runs into a beaver standing still winds it just the same.
+blocker.pos.update(left.pos.x + 200, left.pos.y)
+run(game, config["treasure"]["deer_grace"] + .3)
+assert left.stall == 0
+blocker.pos.update(left.pos.x + 12, left.pos.y)
+game.update(1 / 60, {})
+assert left.stall > 0, "a deer on top of an idle beaver must stall it"
+run(game, config["treasure"]["deer_stall"] + .1)
 blocker.pos.update(40, 700)
+run(game, config["treasure"]["deer_grace"] + .1)
 game.boosts = [[game.point_at(left, left.travelled + 30), True]]
 run(game, 1, lambda: tracing(game))
 assert not game.boosts[0][1] and "zip" in game.sounds and left.boost > 0
