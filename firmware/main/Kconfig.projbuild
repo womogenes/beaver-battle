@@ -51,7 +51,7 @@ config BB_SERVO_ENABLED
     default n
     help
         Leave disabled until rest/press pulse widths and mechanical travel are
-        calibrated. When disabled GPIO26 stays low and no servo pulse is sent.
+        calibrated. When disabled GPIO33 stays low and no servo pulse is sent.
 
 config BB_SERVO_BUTTON_TEST
     bool "Servo button bench test (no Wi-Fi, laser off)"

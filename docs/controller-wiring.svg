@@ -103,7 +103,7 @@
 <text x="991" y="683" class="small">SPECIAL</text>
 <text x="840" y="728" class="small">Normally open switches; internal pull-ups enabled.</text>
 <polyline points="840,749 1342,749" fill="none" stroke="#d6deea" stroke-width="2" stroke-linejoin="round"/>
-<text x="840" y="784" class="pin" style="fill:#14786c">GPIO26 → servo SIGNAL</text>
+<text x="840" y="784" class="pin" style="fill:#14786c">GPIO33 → servo SIGNAL</text>
 <text x="840" y="817" class="label" style="fill:#cf354a">Converter +5V → servo POWER +</text>
 <text x="840" y="850" class="label">Converter GND → servo GND</text>
 <text x="840" y="890" class="small">Power the servo directly from the converter.</text>

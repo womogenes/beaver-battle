@@ -102,7 +102,7 @@ the shared project; a board's ignored local sdkconfig can enable it for testing.
 
 For a positional-servo direction test, first disable the laser bench option,
 then enable **Servo button bench test** (`CONFIG_BB_SERVO_BUTTON_TEST=y`) and
-rebuild/flash. GPIO26 produces 50 Hz pulses starting at 1500 microseconds. Hold
+rebuild/flash. GPIO33 produces 50 Hz pulses starting at 1500 microseconds. Hold
 FIRE (GPIO27) to lower the pulse; hold SPECIAL (GPIO32) to raise it. The default
 step is 5 microseconds every 20 ms (250 microseconds/second);
 `BB_SERVO_TEST_STEP_US` adjusts command speed from 1 to 100 microseconds per
@@ -159,7 +159,7 @@ establishes current state and consumes any included feedback ID without firing;
 this prevents effects accumulated while disconnected from replaying. The laptop
 must send a fresh event ID afterward to request a new press.
 
-Servo output is **disabled by default**: GPIO26 remains low and no PWM pulses are
+Servo output is **disabled by default**: GPIO33 remains low and no PWM pulses are
 sent. This does not physically put an attached mechanism at rest. Once enabled,
 startup and connection loss command `CONFIG_BB_SERVO_REST_US`; movement uses
 `CONFIG_BB_SERVO_PRESS_US`. The defaults of 1500 and 1600 microseconds are

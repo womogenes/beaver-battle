@@ -15,12 +15,12 @@ All grounds connect together: battery negative, converter ground, ESP32 GND, MOS
 | Fire/thrust | GPIO27 → normally open button → GND |
 | Special | GPIO32 → normally open button → GND |
 | Laser control | GPIO25 → 330 Ω gate resistor → N-channel MOSFET gate |
-| Servo signal | GPIO26 → servo signal input |
+| Servo signal | GPIO33 → servo signal input |
 | Common ground | ESP32 GND, MOSFET source, servo ground, external supply negative |
 
 Buttons use internal pull-ups and 15 ms debounce. They do not connect to 5 V. For four-legged switches, use contacts that are open when released and short together when pressed.
 
-The servo's positive power wire goes to its rated supply, not GPIO26 or the laser switch. **D26 is GPIO26**, the servo signal pin. Normal game firmware leaves servo pulses disabled until its rest/press positions are configured and enabled; the explicit servo bench test below enables pulses for calibration. Do not connect raw 9 V to GPIO, 3V3, or the shown 5 V rail.
+The servo's positive power wire goes to its rated supply, not GPIO33 or the laser switch. **D33 is GPIO33**, the servo signal pin. Normal game firmware leaves servo pulses disabled until its rest/press positions are configured and enabled; the explicit servo bench test below enables pulses for calibration. Do not connect raw 9 V to GPIO, 3V3, or the shown 5 V rail.
 
 ## Laser current limit
 
