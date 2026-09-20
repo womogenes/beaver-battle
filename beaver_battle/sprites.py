@@ -103,6 +103,27 @@ def lettering(message, size, color, spacing=0):
     return image
 
 
+def fitted(image, width):
+    """An image shrunk, if it must be, to fit a width: header text never runs into its neighbours."""
+    if image.get_width() <= width:
+        return image
+    return pygame.transform.smoothscale(image, (max(1, round(width)), max(1, round(image.get_height() * width / image.get_width()))))
+
+
+def time_bar(surface, area, left, clock=0.0, hurry=.2):
+    """Time left as a draining bar, read at a glance from across the room where a small number is not. `left` runs
+    from 1 to 0; in the last stretch the bar blinks between two blues (never red: the camera reads red as a laser)."""
+    area = pygame.Rect(area)
+    round_by = area.height // 2
+    pygame.draw.rect(surface, BLUE, area.inflate(area.height // 2, area.height // 2), border_radius=round_by + area.height // 4)
+    pygame.draw.rect(surface, WHITE, area, border_radius=round_by)
+    left = max(0.0, min(1.0, left))
+    if left > 0:
+        color = BLUE_BRIGHT if left > hurry or int(clock * 5) % 2 else SKY
+        fill = pygame.Rect(area.x, area.y, max(area.height, round(area.width * left)), area.height)
+        pygame.draw.rect(surface, color, fill, border_radius=round_by)
+
+
 def sign(message, size, color=BLUE):
     """Reading text for a projector: solid dark-blue letters inside a white halo.
 

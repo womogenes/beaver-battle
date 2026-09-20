@@ -14,7 +14,7 @@ import numpy as np
 import pygame
 
 from beaver_battle import sound
-from beaver_battle.dam import CELL, DamIt
+from beaver_battle.dam import CELL, MAPS, DamIt
 from beaver_battle.model import PlayerInput
 
 pygame.init()
@@ -23,12 +23,12 @@ with open("config.toml", "rb") as source:
 rules = config["dam"]
 
 
-def fresh(limit=None):
+def fresh(limit=None, board=0):
     settings = copy.deepcopy(config)
     if limit is not None:
         settings["dam"]["attack_seconds"] = limit
     game = DamIt(settings)
-    game.new_match((1, 2), swap=False)
+    game.new_match((1, 2), swap=False, board=board)
     return game
 
 
@@ -222,12 +222,40 @@ for step in range(60 * 4):
     idle.update(1 / 60, {})
 assert idle.winner == 1 and idle.verdict == "THE LODGE STAYED DRY!"
 
-# Roles swap from round to round.
+# Roles swap from round to round, and the map moves on once both players have built on it (or when asked).
 game = DamIt(config)
 game.new_match((1, 2))
 first = (game.builder, game.attacker)
 game.new_match((1, 2))
 assert (game.builder, game.attacker) == first[::-1]
+boards = [game.board_index]
+for round_number in range(4):
+    game.new_match((1, 2))
+    boards.append(game.board_index)
+assert boards == [0, 1, 1, 2, 2], boards
+game.new_match((1, 2), board=game.board_index + 1)
+assert game.board_index == 3 and game.board_rounds == 1
+game.new_match((1, 2), board=game.board_index + 1)
+assert game.board_index == 0, "the maps go round"
+
+# Every bite takes a visible block out of the piece, but the piece holds water until its last one.
+game = sealed((lambda g: (wall(g, 900), g)[1])(fresh(60)))
+for step in range(60 * 3):
+    game.update(1 / 60, {2: PlayerInput(2, (300, game.lodge.y), True, False)})
+bitten = [section for section, (left, whole) in game.strength.items() if 0 < left < whole]
+assert bitten and game.eaten is not None and game.eaten.any() and not (game.eaten & ~game.wood).any()
+assert (game.eaten & (game.sections == bitten[0])).sum() < .9 * (game.sections == bitten[0]).sum(), "something is always left standing"
+assert game.flooded == 0 and not game.passable(pygame.Vector2(900, game.lodge.y)), "bitten wood still holds"
+
+# Every map holds water behind a plain wall, keeps its lodge and beaver on open ground, and lets the river reach the
+# lodge when there is no dam.
+for index, layout in enumerate(MAPS):
+    game = fresh(60, index)
+    assert not game.solid[int(game.lodge.y), int(game.lodge.x)] and not game.solid[int(game.beaver.y), int(game.beaver.x)], layout["name"]
+    wall(game, 700)
+    assert sealed(game).phase == "attack" and game.flooded == 0, f"{layout['name']}: a wall should hold"
+    assert abs(game.timer - 60 * layout["clock"]) < 1, "each map has its own clock"
+    assert sealed(fresh(60, index)).winner == 2, f"{layout['name']}: with no dam the lodge floods"
 
 # Balance. Every kind of dam against the same attacker, one that reacts and aims like a person, with all the time in
 # the world:
@@ -258,6 +286,21 @@ assert 1.15 * best <= limit <= 1.4 * best, f"attack_seconds {limit} against a be
 assert sum(seconds > limit * .75 for seconds in times.values()) >= 2, "more than one dam should be worth building"
 assert sum(seconds < limit * .6 for seconds in times.values()) >= 2, "and a poor choice of dam should lose clearly"
 
+# The other maps are kept as fair as the first: a few plain dams each, and the clock a quarter or so beyond the best.
+map_times = {}
+for index, layout in enumerate(MAPS[1:], 1):
+    found = {}
+    for name, plan in (("far wall", lambda g: wall(g, 170)), ("upstream wall", lambda g: wall(g, 430)), ("downstream wall", lambda g: wall(g, 830)), ("arc by the lodge", lambda g: arc(g, 165))):
+        game = fresh(999, index)
+        plan(game)
+        sealed(game)
+        assert game.phase == "attack", f"{layout['name']}: {name} should hold water"
+        found[name] = attack(game, 120, True)
+        assert found[name] is not None, (layout["name"], name)
+    map_times[layout["name"]] = max(found.values())
+    clock = rules["attack_seconds"] * layout["clock"]
+    assert 1.1 * max(found.values()) <= clock <= 1.5 * max(found.values()), f"{layout['name']}: {clock:.0f} s against {found}"
+
 # Rendering each phase works, and every sound named exists.
 surface = pygame.Surface((1280, 720))
 game = fresh()
@@ -271,6 +314,6 @@ names = {word for line in open("beaver_battle/dam.py") if "sounds" in line and (
          for word in __import__("re").findall(r'"(\\w+)"', line)} - {"go"} | {"go"}
 assert names <= set(sound.build()), names - set(sound.build())
 
-print("Dam checks passed: shared strength, excess wood weakens, slabs cut across, no slivers, sealing and leaks, keep-out and allowance, logs and sticks, the beaver, "
+print("Dam checks passed: four maps, block-by-block chewing, shared strength, excess wood weakens, slabs cut across, no slivers, sealing and leaks, keep-out and allowance, logs and sticks, the beaver, "
       f"role swap, rendering, sounds; balance: floods take {', '.join(f'{name} {seconds:.0f} s' for name, seconds in sorted(times.items(), key=lambda item: item[1]))}; "
-      f"attack time {limit:g} s")
+      f"attack time {limit:g} s; other maps' best dams " + ", ".join(f"{name} {seconds:.0f} s" for name, seconds in map_times.items()))

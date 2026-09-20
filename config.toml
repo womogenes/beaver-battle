@@ -101,7 +101,7 @@ music = true
 music_volume = 0.75 # The theme sits under the effects; build it with checks/build_music.py.
 
 [treasure]
-draw_seconds = 30 # Each player's time to draw a route to the chest.
+draw_seconds = 15 # Each player's time to draw a route to the chest.
 merge_gap = 34 # Breaks in a drawn line up to this wide, in logical pixels, are joined; wider ones lose.
 check_seconds = 2.6 # How long the judged routes are shown before the race.
 walk_speed = 68.0 # Pixels per second on grass; tuned so a race lasts about ten seconds.
@@ -149,3 +149,4 @@ rise_seconds = 2.5
 beaver_speed = 200.0
 bite_seconds = 0.3 # The quickest a beaver can bite; holding the button bites at this rate.
 bite_reach = 34
+bite_size = 70 # One chomp removes at most a patch this wide, so big pieces of a weak dam still go gradually.

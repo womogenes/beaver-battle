@@ -101,6 +101,7 @@ assert game.phase == "match_over" and game.winner == 2 and game.verdict == "TREA
 
 # The beaver only walks while its line is being traced, swims slower than it walks, and boosts on button 2.
 game = fresh(1)
+game.portals = []  # The chest is on an island: without its portal the only way there is through the moat.
 left = game.runners[1]
 draw(game, left, game.bot_plan(left))
 draw(game, game.runners[2], game.bot_plan(game.runners[2]))
@@ -116,6 +117,7 @@ run(game, 1, lambda: {1: PlayerInput(1, tuple(game.point_at(left, left.travelled
 assert left.travelled - before > walked * 1.3 and "boost" in game.sounds and left.cooldown > 0
 while not game.in_water(left.pos) and game.phase == "running":
     run(game, .1, lambda: tracing(game))
+run(game, .1, lambda: tracing(game))  # One more step, so the beaver that has just reached the bank is in.
 assert left.state == "swimming" and "plunge" in game.sounds and game.particles
 while left.boost > 0:
     run(game, .1, lambda: tracing(game))
@@ -174,6 +176,7 @@ for kind in ("tree", "log"):
 # A portal carries a path from one end to the other: ink to the first pad and ink from the second is a whole route,
 # the hop costs no distance, and the beaver arrives on the far side with a sound.
 game = fresh(6)
+game.trees, game.logs = [], []  # The portal itself is on trial here, so the strokes to and from it may be straight.
 left = game.runners[1]
 entry, exit_pad = next((first, second) for first, second, index in game.portals if first.x < game.width / 2)
 draw(game, left, [left.start, (left.start.x, entry.y), entry])
@@ -200,6 +203,7 @@ assert without.find_route(without.runners[1], without.runners[1].ink)[0] is None
 
 # Running into a deer winds a beaver for two seconds, after which it may push past; a berry gives a burst of speed.
 game = fresh(1)
+game.portals = []  # The chest is on an island: without its portal the only way there is through the moat.
 left = game.runners[1]
 draw(game, left, game.bot_plan(left))
 draw(game, game.runners[2], game.bot_plan(game.runners[2]))
@@ -289,6 +293,20 @@ names = {word for line in open("beaver_battle/treasure.py") if "sounds.append(" 
          for word in __import__("re").findall(r'"(\w+)"', line.split("sounds.append(", 1)[1])} - {"swim_speed", "walk_speed"}
 assert names <= set(sound.build()), names - set(sound.build())
 
+# No board can be won with lazy strokes: every straightish line (bowed either way, swerving early or late) from a start
+# to the chest, from a start to a portal, or from a portal to the chest meets a rock, a tree or a stick, on every
+# board and however it is dressed; and a real route is always left.
+for solo, boards in ((False, BOARDS), (True, SOLO_BOARDS)):
+    for index, layout in enumerate(boards):
+        for dressing in range(1 if solo else 4):
+            game = Treasure(config)
+            game.matches = dressing
+            game.new_match((1,) if solo else (1, 2), (), index, solo)
+            for runner in game.runners.values():
+                assert not game.open_beelines(runner), f"{layout['name']} can be won with a straight line"
+                assert len(game.bot_plan(runner)) > 2, f"{layout['name']} has no route left"
+assert config["treasure"]["draw_seconds"] == 15
+
 print(f"Treasure checks passed: {len(BOARDS)} fair mirrored boards and {len(SOLO_BOARDS)} lopsided one-player boards, gap merging, broken paths, "
-      "rocks, trees, logs, portals, deer, boost tokens, mirrored scatter, tracing, water, boost, solo, leaderboard, "
+      "rocks, trees, logs, portals, deer, boost tokens, mirrored scatter, no straight-line wins, tracing, water, boost, solo, leaderboard, "
       f"bot races averaging {sum(times) / len(times):.0f} s, rendering, sounds")
