@@ -110,7 +110,7 @@ run the game on the selected HDMI display. Check the actual receiver port first;
 identical CP2102 boards can share the same USB serial identifier.
 The receiver uses 460800 baud. Controllers connect automatically on radio channel 1.
 The default `camera.identity_mode = "telemetry"` uses their reported laser states
-instead of waiting for unsupported command acknowledgements. Hold FIRE and keep the
+instead of using command acknowledgements for identity. Hold FIRE and keep the
 two dots apart during acquisition. If only one dot is detectable while both gates are
 on, the software cannot safely infer both identities. For the older bidirectional
 Wi-Fi firmware, select `identity_mode = "acknowledged"`.
@@ -122,3 +122,10 @@ connected controller supplies the primary hover highlight. Holding button 1 no
 longer cycles menu choices. Missing tracking does not click a previously selected
 item. Keyboard and mouse navigation remain available, and laser navigation works
 in the pause menu too.
+
+Player hit feedback uses the bidirectional ESP-IDF receiver and controller firmware
+(see [firmware instructions](docs/firmware.md)). Each accepted damaging hit targets
+that player's D33 servo: 990 → 570 → 990 µs, with 500 ms at each stage. Both mechanisms
+use the user-confirmed endpoints. Repeated packets never repeat a squeeze; hits during
+a running cycle or its two-second cooldown are consumed without queuing. Buttons keep
+their normal laser/game functions. Older Arduino builds must be reflashed for feedback.

@@ -1,5 +1,21 @@
 menu "Beaver controller"
 
+choice BB_TRANSPORT
+    prompt "Game transport"
+    default BB_WIFI_UDP
+config BB_WIFI_UDP
+    bool "Wi-Fi UDP controller (existing protocol)"
+config BB_ESPNOW_CONTROLLER
+    bool "ESP-NOW controller with hit feedback"
+config BB_ESPNOW_RECEIVER
+    bool "ESP-NOW USB receiver (460800 baud)"
+endchoice
+
+config BB_ESPNOW_CHANNEL
+    int "ESP-NOW radio channel (same on all boards)"
+    range 1 11
+    default 1
+
 config BB_CONTROLLER_ID
     int "Controller ID (unique per controller)"
     range 1 2
@@ -104,11 +120,11 @@ config BB_SERVO_TEST_STEP_US
 config BB_SERVO_REST_US
     int "Servo rest pulse width (microseconds)"
     range 500 2500
-    default 1500
+    default 990
 
 config BB_SERVO_PRESS_US
     int "Servo press pulse width (microseconds)"
     range 500 2500
-    default 1600
+    default 570
 
 endmenu

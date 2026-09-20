@@ -9,14 +9,17 @@
 #include "cJSON.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "driver/uart.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_now.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -31,6 +34,16 @@ enum { LASER_GPIO = 25, SERVO_GPIO = 33, FIRE_GPIO = CONFIG_BB_FIRE_GPIO,
 
 static const char *log_tag = "beaver";
 static EventGroupHandle_t wifi_events;
+
+static void nvs_initialize(void)
+{
+    esp_err_t result = nvs_flash_init();
+    if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        result = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(result);
+}
 
 static uint64_t time_ms(void)
 {
@@ -382,8 +395,188 @@ static void input_send(int connection, const struct sockaddr_in *laptop, uint32_
     }
 }
 
+#if defined(CONFIG_BB_ESPNOW_CONTROLLER) || defined(CONFIG_BB_ESPNOW_RECEIVER)
+enum { RADIO_BYTES = 250, RADIO_SLOTS = 64, RECEIVER_BAUD = 460800 };
+typedef struct { uint16_t length; char data[RADIO_BYTES + 1]; } RadioPacket;
+static QueueHandle_t radio_queue;
+static volatile uint32_t radio_dropped;
+static const uint8_t broadcast[6] = {255, 255, 255, 255, 255, 255};
+
+static void radio_receive(const esp_now_recv_info_t *info, const uint8_t *data, int length)
+{
+    (void)info;
+    if (length <= 0 || length > RADIO_BYTES) return;
+    RadioPacket packet = {.length = (uint16_t)length};
+    memcpy(packet.data, data, (size_t)length);
+    packet.data[length] = '\0';
+    /* Wi-Fi callback only copies bounded data; never parses JSON or writes serial. */
+    if (xQueueSend(radio_queue, &packet, 0) != pdTRUE) radio_dropped++;
+}
+
+static void radio_init(void)
+{
+    radio_queue = xQueueCreate(RADIO_SLOTS, sizeof(RadioPacket));
+    configASSERT(radio_queue != NULL);
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&config));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_ERROR_CHECK(esp_wifi_set_channel(CONFIG_BB_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
+    ESP_ERROR_CHECK(esp_now_init());
+    esp_now_peer_info_t peer = {.channel = CONFIG_BB_ESPNOW_CHANNEL,
+                                .ifidx = WIFI_IF_STA, .encrypt = false};
+    memcpy(peer.peer_addr, broadcast, sizeof(broadcast));
+    ESP_ERROR_CHECK(esp_now_add_peer(&peer));
+    ESP_ERROR_CHECK(esp_now_register_recv_cb(radio_receive));
+}
+
+static bool packet_id(const char *packet, size_t length, const char *kind, uint32_t *id)
+{
+    if (memchr(packet, '\0', length) != NULL) return false;
+    cJSON *json = cJSON_ParseWithLengthOpts(packet, length + 1, NULL, true);
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(json, "type");
+    uint32_t version = 0;
+    bool valid = cJSON_IsObject(json) && json_uint(json, "v", &version) && version == 1 &&
+        cJSON_IsString(type) && strcmp(type->valuestring, kind) == 0 &&
+        json_uint(json, "id", id) && *id >= 1 && *id <= 2;
+    cJSON_Delete(json);
+    return valid;
+}
+#endif
+
+#ifdef CONFIG_BB_ESPNOW_CONTROLLER
+static void espnow_controller_run(void)
+{
+    radio_init();
+    Controller controller = {0};
+    ServoSqueeze squeeze = {.pulse_us = CONFIG_BB_SERVO_REST_US};
+    Button fire = {0}, special = {0};
+    uint32_t boot = esp_random(), seq = 0, failed = 0;
+    uint32_t previous_pulse = CONFIG_BB_SERVO_REST_US;
+    uint64_t pressed_at = 0, last_send = 0, status_at = 0;
+    bool previous_fire = false, previous_laser = false;
+    TickType_t wake = xTaskGetTickCount();
+    ESP_LOGI(log_tag, "ESP-NOW controller %d channel %d; servo %s, start=%d end=%d us",
+             CONFIG_BB_CONTROLLER_ID, CONFIG_BB_ESPNOW_CHANNEL,
+             servo_enabled() ? "enabled" : "disabled", CONFIG_BB_SERVO_REST_US, CONFIG_BB_SERVO_PRESS_US);
+    while (true) {
+        uint64_t now = time_ms();
+        bool changed = buttons_read(&fire, &special, now);
+        if (fire.pressed && !previous_fire) pressed_at = now;
+        previous_fire = fire.pressed;
+        /* Every radio operation and phase transition is nonblocking. */
+        RadioPacket packet;
+        for (unsigned count = 0; count < 8 && xQueueReceive(radio_queue, &packet, 0) == pdTRUE; count++) {
+            uint32_t id = 0;
+            Command command = {0};
+            if (packet_id(packet.data, packet.length, "command", &id) && id == CONFIG_BB_CONTROLLER_ID &&
+                command_parse(packet.data, packet.length, &command) &&
+                controller_squeeze_command(&controller, &squeeze, &command, now, servo_enabled(),
+                                           CONFIG_BB_SERVO_REST_US, CONFIG_BB_SERVO_PRESS_US)) changed = true;
+        }
+        uint32_t pulse = controller_squeeze_tick(&controller, &squeeze, now, CONFIG_BB_SERVO_REST_US);
+        if (servo_enabled() && pulse != previous_pulse) {
+            servo_pulse(pulse);
+            previous_pulse = pulse;
+            ESP_LOGI(log_tag, "HIT servo=%" PRIu32 " us phase=%u event=%" PRIu32,
+                     pulse, squeeze.stage, controller.feedback_id);
+        }
+        /* Local FIRE/identity pattern owns the laser; laptop laser commands are ignored. */
+        bool laser = fire.pressed && laser_identity_level(CONFIG_BB_CONTROLLER_ID,
+                            laser_identity_gap_ms(CONFIG_BB_CONTROLLER_ID), now - pressed_at);
+        output_update(laser, false);
+        changed = changed || laser != previous_laser;
+        previous_laser = laser;
+        if (changed || now - last_send >= HEARTBEAT_MS) {
+            char input[RADIO_BYTES + 1];
+            int length = snprintf(input, sizeof(input),
+                "{\"v\":1,\"type\":\"input\",\"id\":%d,\"boot\":%" PRIu32
+                ",\"seq\":%" PRIu32 ",\"buttons\":%u,\"command_seq\":%" PRIu32 ",\"laser\":%s}",
+                CONFIG_BB_CONTROLLER_ID, boot, ++seq, (fire.pressed ? 1U : 0U) | (special.pressed ? 2U : 0U),
+                controller.command_seq, laser ? "true" : "false");
+            if (length > 0 && length <= RADIO_BYTES &&
+                esp_now_send(broadcast, (const uint8_t *)input, (size_t)length) != ESP_OK) failed++;
+            last_send = now;
+        }
+        if (now >= status_at) {
+            ESP_LOGI(log_tag, "ESP-NOW id=%d packets=%" PRIu32 " failed=%" PRIu32 " dropped=%" PRIu32
+                     " ack=%" PRIu32 " lease=%d servo_phase=%u", CONFIG_BB_CONTROLLER_ID, seq, failed,
+                     radio_dropped, controller.command_seq, controller.leased, squeeze.stage);
+            status_at = now + 2000;
+        }
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(LOOP_MS));
+    }
+}
+#endif
+
+#ifdef CONFIG_BB_ESPNOW_RECEIVER
+static void espnow_receiver_run(void)
+{
+    esp_log_level_set("*", ESP_LOG_NONE);
+    nvs_initialize();
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 4096, 8192, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_set_baudrate(UART_NUM_0, RECEIVER_BAUD));
+    radio_init();
+    const char *ready = "{\"receiver\":\"ready\",\"baud\":460800,\"bidirectional\":true}\n";
+    uart_write_bytes(UART_NUM_0, ready, strlen(ready));
+    char line[RADIO_BYTES + 1];
+    size_t used = 0;
+    bool overflow = false;
+    uint32_t received = 0, commands = 0, failed = 0;
+    uint64_t status_at = 0;
+    while (true) {
+        uint8_t bytes[256];
+        int count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), 0);
+        for (int index = 0; index < count; index++) {
+            if (bytes[index] == '\n') {
+                line[used] = '\0';
+                uint32_t id = 0;
+                Command command = {0};
+                if (!overflow && used && packet_id(line, used, "command", &id) &&
+                    command_parse(line, used, &command)) {
+                    if (esp_now_send(broadcast, (const uint8_t *)line, used) == ESP_OK) commands++;
+                    else failed++;
+                }
+                used = 0;
+                overflow = false;
+            } else if (!overflow) {
+                if (used < RADIO_BYTES) line[used++] = (char)bytes[index];
+                else overflow = true;
+            }
+        }
+        RadioPacket packet;
+        for (unsigned index = 0; index < 32 && xQueueReceive(radio_queue, &packet, 0) == pdTRUE; index++) {
+            uint32_t id = 0;
+            if (packet_id(packet.data, packet.length, "input", &id)) {
+                uart_write_bytes(UART_NUM_0, packet.data, packet.length);
+                uart_write_bytes(UART_NUM_0, "\n", 1);
+                received++;
+            }
+        }
+        uint64_t now = time_ms();
+        if (now >= status_at) {
+            char status[200];
+            int length = snprintf(status, sizeof(status), "{\"receiver\":\"alive\",\"channel\":%d,"
+                "\"packets\":%" PRIu32 ",\"commands\":%" PRIu32 ",\"dropped\":%" PRIu32
+                ",\"failed\":%" PRIu32 ",\"bidirectional\":true}\n",
+                CONFIG_BB_ESPNOW_CHANNEL, received, commands, radio_dropped, failed);
+            uart_write_bytes(UART_NUM_0, status, length);
+            status_at = now + 2000;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+#endif
+
 void app_main(void)
 {
+#ifdef CONFIG_BB_ESPNOW_RECEIVER
+    espnow_receiver_run();
+#endif
     output_init();
     ESP_LOGI(log_tag, "Controller %d: laser off; servo %s", CONFIG_BB_CONTROLLER_ID,
              servo_enabled() ? "enabled" : "disabled");
@@ -397,12 +590,10 @@ void app_main(void)
 #ifdef CONFIG_BB_LASER_IDENTITY_TEST
     laser_identity_test();
 #endif
-    esp_err_t nvs_result = nvs_flash_init();
-    if (nvs_result == ESP_ERR_NVS_NO_FREE_PAGES || nvs_result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        nvs_result = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(nvs_result);
+    nvs_initialize();
+#ifdef CONFIG_BB_ESPNOW_CONTROLLER
+    espnow_controller_run();
+#endif
     wifi_init();
     struct sockaddr_in laptop = {
         .sin_family = AF_INET,

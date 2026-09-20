@@ -156,3 +156,38 @@ uint32_t servo_squeeze_tick(ServoSqueeze *squeeze, uint64_t now_ms)
     }
     return squeeze->pulse_us;
 }
+
+bool controller_squeeze_command(Controller *controller, ServoSqueeze *squeeze,
+                                const Command *command, uint64_t now_ms,
+                                bool enabled, uint32_t start_us, uint32_t end_us)
+{
+    controller_squeeze_tick(controller, squeeze, now_ms, start_us);
+    bool was_pressing = controller->pressing;
+    if (!controller_command(controller, command, now_ms, enabled)) return false;
+    if (!was_pressing && controller->pressing) {
+        if (servo_squeeze_start(squeeze, start_us, end_us, now_ms)) {
+            /* The squeeze helper owns phase deadlines, including late ticks. */
+            controller->press_until_ms = UINT64_MAX;
+            controller->cooldown_until_ms = now_ms + 1500 + FEEDBACK_COOLDOWN_MS;
+        } else controller->pressing = false;
+    }
+    return true;
+}
+
+uint32_t controller_squeeze_tick(Controller *controller, ServoSqueeze *squeeze,
+                                uint64_t now_ms, uint32_t rest_us)
+{
+    controller_tick(controller, now_ms);
+    if (!controller->leased || !controller->pressing) {
+        squeeze->stage = 0;
+        squeeze->pulse_us = rest_us;
+        return rest_us;
+    }
+    uint32_t pulse = servo_squeeze_tick(squeeze, now_ms);
+    if (!squeeze->stage) {
+        controller->pressing = false;
+        controller->press_until_ms = now_ms;
+        controller->cooldown_until_ms = now_ms + FEEDBACK_COOLDOWN_MS;
+    }
+    return pulse;
+}

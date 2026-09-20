@@ -9,9 +9,9 @@ ESP-IDF, and the built-in cJSON component. The PlatformIO environment pins
 | GPIO | Function | Configuration |
 | --- | --- | --- |
 | 25 | Laser driver's logic input | LEDC channel 0, timer 0, 5 kHz, 10-bit duty; off at startup |
-| 26 | Servo signal | LEDC channel 1, timer 1, 50 Hz; disabled by default |
-| 27 | Fire/thrust button | Switch to GND, internal pull-up, active low |
-| 32 | Special button | Switch to GND, internal pull-up, active low |
+| 33 | Servo signal | LEDC channel 1, timer 1, 50 Hz; disabled by default |
+| 14 | Fire/thrust button | Switch to GND, internal pull-up, active low |
+| 27 | Special button | Switch to GND, internal pull-up, active low |
 
 Each button must remain stable for 15 ms before its state changes. These are GPIO
 numbers, not header positions. GPIO25 is a 3.3 V control signal for an external
@@ -29,7 +29,7 @@ uv tool run --python 3.12 --from platformio platformio run -d firmware -t menuco
 
 Open **Beaver controller** and set the following for each board:
 
-- Unique controller ID: `1`, `2`, or `3`.
+- Unique controller ID: `1` or `2`.
 - Wi-Fi SSID/password and the laptop's reachable IPv4 address; UDP port defaults
   to `4210`, matching the game.
 - Leave **Enable calibrated servo output** off initially.
@@ -437,3 +437,49 @@ The two distinct endpoints must be recorded before a squeeze is accepted;
 retriggering during a cycle is rejected. Endpoints currently live in RAM and
 must be recorded again after reboot. Final calibrated values can then be used
 by the shared `servo_squeeze_start`/`servo_squeeze_tick` C functions.
+
+## ESP-IDF ESP-NOW game and receiver modes
+
+The C firmware now supports the return path needed for hit feedback. Select **Game
+transport → ESP-NOW controller with hit feedback** for each handheld, or **ESP-NOW
+USB receiver (460800 baud)** for the laptop's third board. All use radio channel 1
+by default, with no access point or Internet connection required. The existing
+Wi-Fi UDP and standalone calibration modes remain available. Disable all three
+bench test options when building game or receiver firmware.
+
+Controller 1's measured bottle endpoints are start/rest **990 microseconds**, squeeze
+**570 microseconds**, on D33. The user confirmed both
+controllers use these same endpoints; enable `BB_SERVO_ENABLED` for both current
+boards. A replacement mechanism must be calibrated before enabling it. Set
+`BB_SERVO_REST_US` and `BB_SERVO_PRESS_US` separately for each board. The defaults
+are 990/570, but an existing sdkconfig retains its old settings until changed.
+
+A valid new hit performs start → squeeze → start, holding each target for 500 ms.
+The loop continues debouncing buttons, updating laser state, and sending radio
+telemetry during this sequence. Retransmitted events never repeat it. Hits during
+the sequence or the following 2-second cooldown are consumed rather than queued.
+A new session or reconnection consumes its first event as a baseline. If valid
+commands stop for 500 ms, the mechanism returns to start and cancels the cycle.
+A late phase tick preserves the full dwell rather than skipping a target.
+
+The receiver accepts newline-delimited command JSON over USB at 460800 baud:
+
+```json
+{"v":1,"type":"command","id":1,"session":456,"seq":2,"laser":true,"feedback_id":1,"duration_ms":200}
+```
+
+`id` is required for radio routing. The other fields retain the v1 protocol names;
+positive `duration_ms` enables the calibrated sequence, whose fixed 500 ms phases
+replace the legacy UDP press duration. Commands are broadcast and each controller
+accepts only its own ID. Accepted commands appear in input `command_seq`. The
+controller's local FIRE button still owns D25: controller 1 stays steady, controller 2
+uses its 176 ms dark gap every 800 ms. A command's `laser` field does not override that
+pattern, so the game must retain telemetry-based laser identification.
+
+The radio callback copies into a bounded 64-packet FreeRTOS queue and never parses
+JSON or writes serial. Receiver heartbeat lines include `bidirectional: true`,
+`commands`, `dropped`, and `failed`; increasing drop/failure counts need investigation.
+The receiver firmware uses no controller GPIO or servo outputs. Legacy Arduino
+controllers and receivers still carry input, but do not gain feedback until both
+ends are upgraded. Broadcast command delivery is best-effort; the relay's periodic
+resends and event IDs provide retry and duplicate suppression.

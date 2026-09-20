@@ -70,13 +70,19 @@ assert game.players[1].reload == 0 and game.players[1].ammo == 3
 
 # One projectile cannot take both lives; feedback identifiers remain unique.
 game = arena()
+game.config["feedback"] = {"duration_ms": 175}
 victim = game.players[2]
 assert game.hit(victim) and victim.state == "beaver"
 assert not game.hit(victim) and len(game.events) == 1
+assert (game.events[0].player_id, game.events[0].kind, game.events[0].duration_ms) == (2, "hit", 175)
 first_event = game.events[0].event_id
 game.update(.81, {})
+assert not game.events, "The next game update must not replay a prior squeeze"
 assert game.hit(victim) and victim.state == "eliminated"
+assert len(game.events) == 1 and game.events[0].player_id == 2
 assert game.events[-1].event_id > first_event
+victim.invulnerability = 0
+assert not game.hit(victim) and len(game.events) == 1, "Eliminated players must not emit another squeeze"
 game.update(0, {})
 assert game.phase == "round_over" and game.scores[1] == 1
 game.update(0, {})
@@ -108,9 +114,11 @@ game.update(0, {}, walls)
 game.rocks.append(Rock(1, pygame.Vector2(250, 350), pygame.Vector2(20000, 0), 4, 2))
 game.update(1 / 60, {})
 assert not game.rocks and game.players[2].state == "canoe"
+assert not game.events, "A rock blocked by ink must not squeeze the protected player"
 game.players[1].powerup = "laser"
 game.update(0, {1: PlayerInput(1, special=True)})
 assert game.players[2].state == "canoe"
+assert not game.events, "A laser blocked by ink must not squeeze the protected player"
 game.players[1].pos = pygame.Vector2(281, 350)
 game.shoot(1, game.players[1].pos, 0, 18)
 assert not game.rocks
@@ -213,6 +221,7 @@ for prop in game.props:
     game.hit(prop, 3)
 assert {pickup.kind for pickup in game.pickups} == {"laser", "jouster", "mine"}
 assert all(prop.hp <= 0 for prop in game.props)
+assert not game.events, "Damaging scenery must not squeeze a player's controller"
 game.update(0, {}, np.zeros((720, 1280), dtype=bool))
 assert all(prop.hp <= 0 for prop in game.props), "Live camera updates must not restore destroyed objects"
 
@@ -233,6 +242,7 @@ game = arena()
 game.players[1].powerup = "laser"
 game.update(0, {1: PlayerInput(1, special=True)})
 assert game.players[2].state == "beaver" and game.players[1].powerup is None
+assert len(game.events) == 1 and game.events[0].player_id == 2
 game.players[1].powerup = "mine"
 game.update(0, {1: PlayerInput(1, special=True)})
 assert game.players[1].powerup == "mine" and not game.mines
@@ -250,6 +260,7 @@ assert game.players[1].pos.distance_to(start) > config["game"]["canoe_speed"] * 
 game.players[2].pos = game.players[1].pos + pygame.Vector2(40, 0)
 game.update(0, {})
 assert game.players[2].state == "beaver" and game.players[1].joust == 0
+assert len(game.events) == 1 and game.events[0].player_id == 2
 
 # Mines arm, damage opponents, spare their owner, and respect physical cover.
 game = arena()
@@ -258,6 +269,7 @@ game.players[2].pos = pygame.Vector2(450, 350)
 game.mines = [Mine(1, pygame.Vector2(400, 350), 9)]
 events = game.update(.61, {})
 assert game.players[1].state == "canoe" and game.players[2].state == "beaver" and len(events) == 1
+assert events[0].player_id == 2
 game = arena()
 game.players[2].pos = pygame.Vector2(550, 350)
 game.mines = [Mine(1, pygame.Vector2(500, 350), 9)]
@@ -265,6 +277,7 @@ walls = np.zeros((720, 1280), dtype=bool)
 walls[:, 525] = True
 game.update(.7, {}, walls)
 assert game.players[2].state == "canoe" and game.mines
+assert not game.events, "A mine blocked by cover must not squeeze the protected player"
 
 # Turret fire damages a target, without colliding with its own emitter.
 game = arena()
@@ -274,6 +287,7 @@ turret = Prop("turret", pygame.Vector2(200, 200), 20, 3, cooldown=0)
 game.props = [turret]
 game.update(.5, {})
 assert turret.hp == 3 and game.players[2].state == "beaver"
+assert len(game.events) == 1 and game.events[0].player_id == 2
 
 # Beams warn first, then damage each player at most once per activation.
 game = arena()
@@ -282,11 +296,14 @@ game.players[2].pos = pygame.Vector2(450, 200)
 game.props = [Prop("beam", pygame.Vector2(200, 200), 18, 3)]
 game.update(.95, {})
 assert game.players[2].state == "canoe"
+assert not game.events, "A beam warning is not a damaging hit"
 game.update(.2, {})
 assert game.players[2].state == "beaver"
+assert len(game.events) == 1 and game.events[0].player_id == 2
 game.players[2].invulnerability = 0
 game.update(.1, {})
 assert game.players[2].state == "beaver"
+assert not game.events, "A beam must not repeat feedback during the same activation"
 
 # Beaver thrust changes speed while keeping a nonzero floating speed.
 game = arena((1,))

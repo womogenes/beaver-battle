@@ -55,5 +55,10 @@ typedef struct {
 
 bool servo_squeeze_start(ServoSqueeze *squeeze, uint32_t start_us, uint32_t end_us, uint64_t now_ms);
 uint32_t servo_squeeze_tick(ServoSqueeze *squeeze, uint64_t now_ms);
+bool controller_squeeze_command(Controller *controller, ServoSqueeze *squeeze,
+                                const Command *command, uint64_t now_ms,
+                                bool enabled, uint32_t start_us, uint32_t end_us);
+uint32_t controller_squeeze_tick(Controller *controller, ServoSqueeze *squeeze,
+                                uint64_t now_ms, uint32_t rest_us);
 
 #endif

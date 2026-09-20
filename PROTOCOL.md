@@ -29,12 +29,37 @@ Integrator owns this protocol. Firmware and Python bridge must use these exact k
 ## ESP-NOW telemetry identification
 
 The Arduino ESP-NOW controllers broadcast inputs through a USB receiver and the serial
-relay; this transport has no laptop-to-controller command path. `command_seq` remains
-zero and must not be treated as an acknowledgement. With `camera.identity_mode =
-"telemetry"`, vision uses fresh reported `laser` gate states, matched to camera time,
+relay. Older Arduino builds are input-only and leave `command_seq` at zero. The
+ESP-IDF ESP-NOW builds add the feedback return path described below. With
+`camera.identity_mode = "telemetry"`, vision uses fresh reported `laser` gate states, matched to camera time,
 to identify a sole illuminated controller after `identity_settle`. Controller 1 stays
 steady while FIRE is held; controller 2 has a 176 ms dark gap every 800 ms. With both
 lit, a separately detected second dot can acquire the remaining identity only when the
 first dot is already confidently tracked. Missing, overlapping, stale, or ambiguous
-observations do not establish identity. This transport does not deliver servo feedback.
+observations do not establish identity. Servo feedback requires the bidirectional
+ESP-IDF receiver and controller builds; older input-only firmware cannot deliver it.
 The original bidirectional UDP firmware uses `identity_mode = "acknowledged"`.
+
+
+## Hit feedback over ESP-NOW
+
+The game emits feedback for the player actually hit. The UDP reply arrives on that
+player's relay socket. The relay validates the game's source address and command
+schema, adds `id` (1 or 2) from the socket identity, then writes compact newline
+JSON to the receiver at 460800 baud. The receiver broadcasts a bounded ESP-NOW
+command; only the controller with the matching `id` acts on it.
+
+The ESP-NOW controller keeps laser/button behavior local for telemetry identity;
+`laser` commands do not override its FIRE gate. Feedback follows session, sequence,
+lease, duplicate and cooldown rules: a reconnect establishes a baseline and never
+replays an old hit, repeated command packets do not repeat a squeeze, and events
+during a running cycle/cooldown are consumed rather than queued.
+
+The calibrated squeeze for both controllers is D33, 990→570→990 microseconds, with 500 ms
+at each stage. Each controller has independent build settings for endpoints and
+servo enablement. The user confirmed these endpoints for both mechanisms. The original bidirectional UDP firmware retains
+its existing press/return behavior; this explicit three-stage cycle is used by the
+new ESP-NOW feedback mode.
+
+In ESP-NOW mode, lease expiry cancels the servo cycle to rest but leaves local FIRE
+laser gating active. A positive duration_ms requests the fixed three-stage cycle.

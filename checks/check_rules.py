@@ -89,6 +89,7 @@ swimmer.invulnerability = 0
 swimmer.pos.update(rammer.pos + (10, 0))
 game.update(1 / 60, {})
 assert swimmer.state == "eliminated" and game.scores[1] == 1 and "ram" in game.sounds
+assert len(game.events) == 1 and game.events[0].player_id == 2, "Ramming feedback belongs only to the swimmer hit"
 
 # The match ends at the end of a round once somebody leads with the goal; a shared lead plays on.
 game = arena()

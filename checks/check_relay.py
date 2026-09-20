@@ -95,3 +95,50 @@ check_the_bridge_accepts_what_the_relay_sends()
 check_the_baud_matches_the_receiver()
 print('Relay checks passed: packet filtering, both controllers reach the bridge on separate '
       'endpoints, both buttons arrive as player input, and the baud matches the receiver', flush=True)
+
+
+def check_hit_command_return_path():
+    from beaver_battle.model import FeedbackEvent
+    config = dict(network=dict(bind='127.0.0.1', port=0, timeout=.5),
+                  camera=dict(stale_seconds=.5), feedback=dict(enabled=True))
+    bridge = ControllerBridge(config)
+    bridge.start()
+    relay = Relay(*bridge.connection.getsockname())
+    try:
+        for player_id in (1, 2):
+            relay.send(packet(player_id, 1))
+        deadline = time.monotonic()+2
+        while len(bridge.active_ids(100))<2 and time.monotonic()<deadline:
+            bridge.poll(100)
+            time.sleep(.005)
+        assert len(bridge.active_ids(100)) == 2
+        bridge.feedback([FeedbackEvent(2, 1, 200)],100)
+        bridge.send(100,force=True)
+        received = {}
+        deadline = time.monotonic()+2
+        while len(received)<2 and time.monotonic()<deadline:
+            for line in relay.commands():
+                command=json.loads(line)
+                received[command['id']]=command
+                assert line.endswith(b'\n') and len(line.rstrip())<=250
+            time.sleep(.005)
+        assert received[1]['feedback_id'] == 0
+        assert received[2]['feedback_id'] == 1
+        assert received[2]['session'] == bridge.session
+        assert received[2]['duration_ms'] == 200
+        # A datagram from another socket must never become an actuator command.
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as stranger:
+            stranger.sendto(json.dumps(received[2]).encode(),relay.sockets[2].getsockname())
+            time.sleep(.01)
+            assert relay.commands() == []
+        for malformed in (b'[]',b'{bad',json.dumps(dict(received[2],duration_ms=True)).encode()):
+            bridge.connection.sendto(malformed,relay.sockets[2].getsockname())
+        time.sleep(.01)
+        assert relay.commands() == []
+    finally:
+        relay.close()
+        bridge.stop()
+    print('Hit return path passed: correct controller, framing, invalid/unrelated command rejection')
+
+
+check_hit_command_return_path()

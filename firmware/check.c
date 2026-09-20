@@ -173,6 +173,69 @@ int main(void)
     assert(servo_squeeze_tick(&squeeze, 9001) == 1300); /* no skipped dwell on late tick */
     squeeze.stage = 0; /* cancellation holds the current pulse */
     assert(servo_squeeze_tick(&squeeze, 9501) == 1300);
-    puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect, servo jogging.");
+    Controller radio = {0};
+    ServoSqueeze hit = {0};
+    Command event = {.session = 77, .seq = 1, .feedback_id = 11, .duration_ms = 200};
+    assert(controller_squeeze_command(&radio, &hit, &event, 0, true, 990, 570));
+    assert(!radio.pressing && !hit.stage); /* first packet establishes a baseline */
+    event.seq++; event.feedback_id++;
+    assert(controller_squeeze_command(&radio, &hit, &event, 100, true, 990, 570));
+    assert(hit.stage == 1 && radio.pressing && radio.cooldown_until_ms == 3600);
+    for (uint64_t now = 200; now <= 1600; now += 100) {
+        if (now == 700) { event.seq++; event.feedback_id++; } /* consumed during squeeze */
+        assert(controller_squeeze_command(&radio, &hit, &event, now, true, 990, 570));
+        uint32_t pulse = controller_squeeze_tick(&radio, &hit, now, 990);
+        assert(pulse == (now >= 600 && now < 1100 ? 570 : 990));
+    }
+    assert(hit.stage == 0 && !radio.pressing && radio.feedback_id == 13);
+    for (uint64_t now = 1700; now <= 3700; now += 100) {
+        if (now == 3500 || now == 3700) { event.seq++; event.feedback_id++; }
+        assert(controller_squeeze_command(&radio, &hit, &event, now, true, 990, 570));
+        assert(radio.pressing == (now == 3700));
+    }
+    assert(controller_squeeze_tick(&radio, &hit, 4200, 990) == 990);
+    assert(!radio.leased && !hit.stage); /* expired command lease cancels and returns rest */
+    event.seq++; event.feedback_id++;
+    assert(controller_squeeze_command(&radio, &hit, &event, 4300, true, 990, 570));
+    assert(!radio.pressing && !hit.stage); /* reconnect event is not replayed */
+    event.session++; event.seq = 1; event.feedback_id = 1;
+    assert(controller_squeeze_command(&radio, &hit, &event, 4400, true, 990, 570));
+    assert(!radio.pressing && radio.cooldown_until_ms == 7200);
+    event.seq++; event.feedback_id++;
+    Controller uncalibrated = {0};
+    ServoSqueeze idle = {0};
+    assert(controller_squeeze_command(&uncalibrated, &idle, &event, 0, false, 990, 570));
+    event.seq++; event.feedback_id++;
+    assert(controller_squeeze_command(&uncalibrated, &idle, &event, 100, false, 990, 570));
+    assert(!uncalibrated.pressing && !idle.stage && uncalibrated.feedback_id == event.feedback_id);
+    Controller late = {0};
+    ServoSqueeze slow = {0};
+    event = (Command){.session = 88, .seq = 1, .duration_ms = 1};
+    assert(controller_squeeze_command(&late, &slow, &event, 0, true, 990, 570));
+    event.seq++; event.feedback_id++;
+    assert(controller_squeeze_command(&late, &slow, &event, 100, true, 990, 570));
+    assert(controller_squeeze_command(&late, &slow, &event, 400, true, 990, 570));
+    assert(controller_squeeze_command(&late, &slow, &event, 650, true, 990, 570));
+    assert(slow.pulse_us == 570 && slow.stage == 2);
+    assert(controller_squeeze_command(&late, &slow, &event, 1100, true, 990, 570));
+    assert(slow.pulse_us == 570); /* late phase still receives its full 500 ms */
+    assert(controller_squeeze_command(&late, &slow, &event, 1150, true, 990, 570));
+    assert(slow.pulse_us == 990 && slow.stage == 3);
+    assert(controller_squeeze_command(&late, &slow, &event, 1500, true, 990, 570));
+    assert(controller_squeeze_command(&late, &slow, &event, 1650, true, 990, 570));
+    assert(!late.pressing && !slow.stage && late.cooldown_until_ms == 3650);
+
+    Controller changing = {0};
+    ServoSqueeze interrupted = {0};
+    event = (Command){.session = 99, .seq = 1, .duration_ms = 200};
+    controller_squeeze_command(&changing, &interrupted, &event, 0, true, 990, 570);
+    event.seq++; event.feedback_id++;
+    controller_squeeze_command(&changing, &interrupted, &event, 100, true, 990, 570);
+    assert(interrupted.stage == 1);
+    event.session++;
+    controller_squeeze_command(&changing, &interrupted, &event, 200, true, 990, 570);
+    assert(controller_squeeze_tick(&changing, &interrupted, 200, 990) == 990);
+    assert(!interrupted.stage && !changing.pressing);
+    puts("Firmware logic checks passed: debounce, lease, order, cooldown, deduplication, reconnect, servo jogging and calibrated hit squeeze.");
     return 0;
 }
