@@ -118,6 +118,7 @@ def main():
                         help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
     parser.add_argument('--players', type=int, choices=(2, 3))
+    parser.add_argument('--no-names', action='store_true', help='skip typing player names before a match')
     parser.add_argument('--mute', action='store_true', help='play no sound effects')
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
     args = parser.parse_args()
@@ -140,6 +141,7 @@ def main():
     if args.seconds < 0:
         parser.error('--seconds must be nonnegative')
     import pygame
+    from beaver_battle import sprites
     from beaver_battle.game import Game
     from beaver_battle.vision import Vision
 
@@ -179,6 +181,11 @@ def main():
     scheduler = IdentityScheduler(config)
     game = Game(config)
     mode = 'game' if args.simulate else ('calibration' if args.calibrate else 'lobby')
+    # Names are typed on the laptop before a match; unattended runs skip the question.
+    ask_names = not (args.headless or args.bench or args.seconds or args.no_names)
+    names, naming, typed = {}, 0, ''
+    if mode == 'game' and ask_names:
+        mode = 'names'
     ids = list(range(1, config['game']['players'] + 1))
     walls = simulated_walls(width, height) if args.simulate else None
     snapshot = VisionSnapshot()
@@ -226,6 +233,24 @@ def main():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                if event.type == pygame.KEYDOWN and mode == 'names' and event.key != pygame.K_ESCAPE:
+                    # Typing a name: every key is a letter here, not a menu shortcut.
+                    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+                        if typed.strip():
+                            names[ids[naming]] = typed.strip()
+                        naming, typed = naming + 1, ''
+                        if naming >= len(ids):
+                            game.names, naming = dict(names), 0
+                            if args.simulate:
+                                game.new_match(ids, walls)
+                                mode = 'game'
+                            else:
+                                ready, mode = set(), 'ready'
+                    elif event.key == pygame.K_BACKSPACE:
+                        typed = typed[:-1]
+                    elif event.unicode and event.unicode.isprintable() and len(typed) < 10:
+                        typed = (typed + event.unicode.upper()).lstrip()
+                    continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         if mode == 'game':
@@ -308,8 +333,8 @@ def main():
                         elif not args.simulate and not snapshot.calibrated:
                             menu_message = 'Calibrate the board before starting.'
                         else:
-                            ids, ready, mode = active_ids[:count], set(), 'ready'
-                            menu_message = ''
+                            ids, ready, mode = active_ids[:count], set(), 'names' if ask_names else 'ready'
+                            naming, typed, menu_message = 0, '', ''
             elif mode == 'ready':
                 for player_id in ids:
                     current = inputs.get(player_id, PlayerInput(player_id, connected=False))
@@ -385,14 +410,25 @@ def main():
             else:
                 screen.fill((224, 239, 241))
                 text_line('BEAVER BATTLE', 80, True)
-                if mode == 'ready':
+                if mode == 'names':
+                    text_line("WHO'S PLAYING?", 200, color=sprites.BUTTER)
+                    for index, player_id in enumerate(ids):
+                        y = 290 + index * 95
+                        shown = typed + ('_' if int(elapsed * 2) % 2 else ' ') if index == naming else names.get(player_id, f'PLAYER {player_id}')
+                        face = pygame.transform.rotozoom(game.portrait(player_id), 0, 2.0 if index == naming else 1.5)
+                        line = sprites.label(shown if shown.strip() else ' ', 56 if index == naming else 38, sprites.PLAYER_COLORS[player_id - 1])
+                        left = (width - face.get_width() - 24 - line.get_width()) // 2
+                        screen.blit(face, (left, y + 28 - face.get_height() // 2))
+                        screen.blit(line, (left + face.get_width() + 24, y + 28 - line.get_height() // 2))
+                elif mode == 'ready':
                     text_line('Press button 2 to ready', 180)
                     for index, player_id in enumerate(ids):
-                        text_line(f'Player {player_id}: {"READY" if player_id in ready else "waiting"}', 260 + index * 55)
+                        text_line(f'{game.name(player_id)}: {"READY" if player_id in ready else "waiting"}', 260 + index * 55)
                 else:
                     for index, choice in enumerate(menu_choices(mode)):
                         text_line(('> ' if index == selection else '') + choice, 240 + index * 55)
-                text_line(menu_message or status or ('Hold both buttons to cancel' if mode == 'ready' else 'Button 1: choose     Button 2: confirm'), height - 100)
+                text_line(menu_message or status or ('Type a name, then Enter.  Enter alone keeps the one shown.' if mode == 'names' else
+                                                     'Hold both buttons to cancel' if mode == 'ready' else 'Button 1: choose     Button 2: confirm'), height - 100)
                 camera_status = 'simulated' if args.simulate else (snapshot.error or ('calibrated' if snapshot.calibrated else 'needs calibration'))
                 text_line(f'Connected: {active_ids}    Camera: {camera_status}', height - 55)
             if preview and mode in ('lobby', 'pause') and snapshot.preview is not None:

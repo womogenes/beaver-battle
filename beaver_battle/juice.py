@@ -83,7 +83,7 @@ class Juice:
                     self.zoom_age, self.focus = 0.0, pos.copy()
             elif kind == "round":
                 winner, match = event[2], event[3]
-                self.banner = (f"PLAYER {winner}!" if winner else "DRAW!", self.color(winner), match)
+                self.banner = (f"{game.name(winner)}!", self.color(winner), match)
                 self.banner_age = -.45
             elif kind == "pickup":
                 player_id = event[2]
@@ -293,13 +293,16 @@ class Juice:
         pygame.draw.ellipse(surface, sprites.INK, plate.inflate(12 * unit, 12 * unit))
         pygame.draw.ellipse(surface, sprites.CREAM, plate)
         title = sprites.label(message, max(24, round(176 * unit)), color, tilt=-4)
+        # A long name is shrunk to fit the plate rather than spilling off it.
+        slam *= min(1, game.width * .6 / title.get_width())
         if abs(slam - 1) > .004:
             title = pygame.transform.rotozoom(title, 0, slam)
         center = (game.width / 2, game.height * .44 + 5 * unit * math.sin(age * 3))
         surface.blit(title, title.get_rect(center=center))
         if age > .3:
-            text = "WINS THE MATCH!" if match else f"Next round in {max(1, math.ceil(game.round_timer))}"
+            text = "WINS THE MATCH!" if match else f"NEXT ROUND IN {max(1, math.ceil(game.round_timer))}"
             if message == "DRAW!":
-                text = "Nobody wins that one"
-            line = sprites.label(text, max(14, round((62 if match else 40) * unit)), sprites.WHITE, tilt=-4 if match else 0)
-            surface.blit(line, line.get_rect(center=(game.width / 2, game.height * .44 + 138 * unit)))
+                text = "NOBODY WINS THAT ONE"
+            # Solid dark letters on the cream plate: white-on-cream was hard to read from across a room.
+            line = sprites.lettering(text, max(14, round((60 if match else 46) * unit)), sprites.INK)
+            surface.blit(line, line.get_rect(center=(game.width / 2, game.height * .44 + 140 * unit)))

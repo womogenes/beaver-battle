@@ -12,7 +12,7 @@ uv run python -m beaver_battle --simulate
 uv run python -m beaver_battle --simulate --mouse --players 2
 ```
 
-The first command after setup runs three bots through complete matches. With `--mouse`, player 1 steers toward the mouse, left click fires/thrusts, and right click activates a pickup. `R` restarts, `Esc` pauses, and Enter/Down operate menus. Use `--fullscreen` for the projected game. Placeholder polygons can be replaced with `assets/canoe.png` and `assets/beaver.png`; keep artwork bright enough for camera segmentation.
+The first command after setup runs three bots through complete matches. A match opens by asking who is playing: type each name on the laptop and press Enter (Enter alone keeps `PLAYER N`; `--no-names` skips the question). Names appear on the scoreboard and on the knockout banner. With `--mouse`, player 1 steers toward the mouse, left click fires/thrusts, and right click activates a pickup. `R` restarts, `Esc` pauses, and Enter/Down operate menus. Use `--fullscreen` for the projected game. Placeholder polygons can be replaced with `assets/canoe.png` and `assets/beaver.png`; keep artwork bright enough for camera segmentation.
 
 For a reproducible check without opening a window:
 

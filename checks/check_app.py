@@ -25,7 +25,7 @@ def key(value):
 class Scenario:
     script: object
     fault: str = ''
-    argv: list = field(default_factory=lambda: ['beaver-battle'])
+    argv: list = field(default_factory=lambda: ['beaver-battle', '--no-names'])  # Name entry needs a keyboard; these scenarios have none.
     now: float = 100.0
     stage: int = 0
     frames: int = 0

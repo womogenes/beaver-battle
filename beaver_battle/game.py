@@ -403,6 +403,7 @@ class Game:
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
     sounds: list[str] = field(default_factory=list)
+    names: dict = field(default_factory=dict)
     fx: list = field(default_factory=list)
     freeze: float = 0.0
     juice: Juice | None = None
@@ -1107,6 +1108,10 @@ class Game:
         return (topleft[0] + 1.6 * self.scale * math.sin(self.time * 1.9 + index * 2.1),
                 topleft[1] + 1.6 * self.scale * math.cos(self.time * 1.4 + index * 1.3))
 
+    def name(self, player_id):
+        """What the players typed at the start, or PLAYER N."""
+        return (self.names.get(player_id) or f"PLAYER {player_id}") if player_id else "DRAW"
+
     def portrait(self, player_id):
         color = COLORS[player_id - 1]
         def build():
@@ -1277,6 +1282,8 @@ class Game:
                 center = (x + (50 + point * 22) * unit, y)
                 pygame.draw.circle(surface, INK, center, 9 * unit)
                 pygame.draw.circle(surface, color if point < self.scores[player.player_id] else sprites.WHITE, center, 6.5 * unit)
+            if self.names.get(player.player_id):
+                self.text(surface, self.names[player.player_id], (x + (50 + (goal - 1) * 11) * unit, y + 27 * unit), 20, sprites.tint(color, .35), centered=True)
             if player.powerup:
                 pop = juice.pops.get(player.player_id, 0)
                 slot = (x + 15 * unit, y + 34 * unit)
@@ -1292,6 +1299,6 @@ class Game:
             self.text(surface, "Erase or move a physical obstacle", (self.width / 2, self.height * .55), 26, centered=True)
         elif self.phase != "playing":
             if juice.banner is None:
-                juice.banner, juice.banner_age = (f"PLAYER {self.winner}!" if self.winner else "DRAW!", juice.color(self.winner), self.phase == "match_over"), 1.0
+                juice.banner, juice.banner_age = (f"{self.name(self.winner)}!", juice.color(self.winner), self.phase == "match_over"), 1.0
             juice.draw_banner(surface, self)
         screen.blit(frame, (0, 0))

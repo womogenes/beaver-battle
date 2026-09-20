@@ -79,6 +79,15 @@ def typeface(size):
     return art_cache[key]
 
 
+def lettering(message, size, color):
+    """Plain text in the display face, surviving a pygame restart since the font was opened."""
+    try:
+        return typeface(size).render(message, True, color)
+    except pygame.error:
+        del art_cache[("typeface", size)]
+        return typeface(size).render(message, True, color)
+
+
 def label(message, size, fill=WHITE, ink=INK, tilt=0):
     """Sticker lettering: glossy two-tone letters, a white rim, a fat outline and a solid block of shadow.
 
@@ -92,13 +101,7 @@ def label(message, size, fill=WHITE, ink=INK, tilt=0):
         big = size >= 30
         rim = max(2, round(size * .045)) if big else 0
         edge, drop = rim + max(2, round(size * .085)), max(2, round(size * (.16 if big else .12)))
-        try:
-            renders = [typeface(size).render(message, True, color) for color in (fill, ink, WHITE, tint(fill, .5))]
-        except pygame.error:
-            # pygame was quit and restarted since the font was opened; reopen it.
-            del art_cache[("typeface", size)]
-            renders = [typeface(size).render(message, True, color) for color in (fill, ink, WHITE, tint(fill, .5))]
-        face, shade, white, shine = renders
+        face, shade, white, shine = [lettering(message, size, color) for color in (fill, ink, WHITE, tint(fill, .5))]
 
         def ringed(source, reach):
             ring = pygame.Surface((face.get_width() + 2 * edge, face.get_height() + 2 * edge), pygame.SRCALPHA)
