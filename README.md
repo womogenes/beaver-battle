@@ -1,6 +1,6 @@
 # Beaver Battle
 
-![Beaver Battle: two whiteboard games played with laser pointers](docs/thumbnail.png)
+![Beaver Battles](docs/thumbnail.png)
 
 A projection-mapped canoe battle for two or three red-laser controllers. Python runs the game, USB camera, calibration, and UDP networking. ESP-IDF C runs the two buttons, laser output, and servo feedback on each ESP32 DevKit V1.
 

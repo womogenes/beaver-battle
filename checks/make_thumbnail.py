@@ -74,13 +74,8 @@ def main():
     put(image, sprites.chest(62, 2.2, open_lid=True), (1200, 500))
     put(image, sprites.tim(19, 2.8), (800, 545))
 
-    title = sprites.label("BEAVER BATTLE", 150, sprites.BLUE_BRIGHT, tilt=3)
-    put(image, title, (WIDTH // 2, 118))
-    words = sprites.sign("two whiteboard games played with laser pointers", 40)
-    plate = words.get_rect(center=(WIDTH // 2, 232)).inflate(44, 18)
-    pygame.draw.rect(image, sprites.INK, plate.inflate(8, 8), border_radius=30)
-    pygame.draw.rect(image, sprites.CREAM, plate, border_radius=26)
-    put(image, words, plate.center)
+    title = sprites.label("BEAVER BATTLES", 142, sprites.BLUE_BRIGHT, tilt=3)
+    put(image, title, (WIDTH // 2, 124))
 
     out = Path(__file__).resolve().parents[1] / "docs" / "thumbnail.png"
     pygame.image.save(image, out)
