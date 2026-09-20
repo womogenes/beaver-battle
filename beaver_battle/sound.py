@@ -90,11 +90,12 @@ def build():
 class SoundBoard:
     """Plays named effects through pygame.mixer; silent, never failing, when there is no audio device."""
 
-    def __init__(self, enabled=True, volume=.6):
+    def __init__(self, enabled=True, volume=.6, music=.35):
         self.sounds = {}
         if not enabled:
             return
         import pygame
+        from pathlib import Path
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init(RATE, -16, 2, 512)
@@ -108,6 +109,16 @@ class SoundBoard:
                 self.sounds[name] = pygame.sndarray.make_sound(np.ascontiguousarray(shaped))
         except (pygame.error, NotImplementedError, ValueError):
             self.sounds = {}
+            return
+        theme = Path(__file__).resolve().parents[1] / "assets" / "music" / "theme.ogg"
+        if music > 0 and theme.is_file():
+            # Made by checks/build_music.py; it loops without a seam and sits under the effects.
+            try:
+                pygame.mixer.music.load(theme)
+                pygame.mixer.music.set_volume(music)
+                pygame.mixer.music.play(-1, fade_ms=1500)
+            except pygame.error:
+                pass
 
     def play(self, names):
         for name in dict.fromkeys(names):
