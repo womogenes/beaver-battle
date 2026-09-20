@@ -145,7 +145,7 @@ def main():
     from beaver_battle import sprites
     from beaver_battle.game import Game
     from beaver_battle.leaderboard import Leaderboard
-    from beaver_battle.treasure import BOARDS, Treasure
+    from beaver_battle.treasure import BOARDS, SOLO_BOARDS, Treasure
     from beaver_battle.vision import Vision
 
     pygame.init()
@@ -347,27 +347,26 @@ def main():
                   else 'Click, or button 1 to switch and button 2 to choose', height - 46)
 
     def draw_scores():
-        """Today's fastest solo crossings, board by board."""
+        """Today's fastest one-player crossings, board by board."""
         screen.fill((224, 239, 241))
-        text_line("TODAY'S BEST TIMES", 20, True)
-        for index, layout in enumerate(BOARDS):
-            panel = pygame.Rect(0, 0, 580, 124)
-            panel.center = (width // 2 + (index % 2 * 2 - 1) * 305, 210 + index // 2 * 138)
-            pygame.draw.rect(screen, sprites.BLUE, panel.inflate(8, 8), border_radius=26)
-            pygame.draw.rect(screen, sprites.WHITE, panel, border_radius=22)
-            title = sprites.lettering(layout['name'], 30, sprites.BLUE_BRIGHT, 1)
-            screen.blit(title, title.get_rect(midleft=(panel.x + 22, panel.y + 26)))
-            rows = scores.top(layout['name'], 3)
+        text_line("TODAY'S BEST TIMES", 14, True)
+        layouts = BOARDS + SOLO_BOARDS
+        for index, layout in enumerate(layouts):
+            panel = pygame.Rect(0, 0, 590, 80)
+            panel.center = (width // 2 + (index % 2 * 2 - 1) * 305, 176 + index // 2 * 90)
+            pygame.draw.rect(screen, sprites.BLUE, panel.inflate(8, 8), border_radius=24)
+            pygame.draw.rect(screen, sprites.WHITE, panel, border_radius=20)
+            title = sprites.lettering(layout['name'], 26, sprites.BLUE_BRIGHT, 1)
+            screen.blit(title, title.get_rect(midleft=(panel.x + 20, panel.y + 24)))
+            rows = scores.top(layout['name'], 2)
             if not rows:
-                empty = sprites.lettering('nobody yet - be the first', 24, sprites.tint(sprites.BLUE, .5))
-                screen.blit(empty, empty.get_rect(midleft=(panel.x + 22, panel.y + 74)))
+                empty = sprites.lettering('nobody yet', 22, sprites.tint(sprites.BLUE, .5))
+                screen.blit(empty, empty.get_rect(midleft=(panel.x + 20, panel.y + 56)))
             for place, (name, seconds) in enumerate(rows):
-                y = panel.y + 56 + place * 24 if len(rows) > 1 else panel.y + 74
-                for words, x, anchor in ((f'{place + 1}.  {name}', panel.x + 22, 'midleft'), (f'{seconds:.2f} s', panel.right - 22, 'midright')):
-                    image = sprites.lettering(words, 24 if place else 26, sprites.BLUE)
-                    screen.blit(image, image.get_rect(**{anchor: (x, y)}))
-        image = sprites.sign('One-player Treasure Dash times, wiped at midnight.  Press any key to go back.', 24, sprites.BLUE_BRIGHT)
-        screen.blit(image, image.get_rect(center=(width // 2, 700)))
+                words = sprites.lettering(f'{place + 1}.  {name}   {seconds:.2f} s', 24 if place == 0 else 20, sprites.BLUE if place == 0 else sprites.tint(sprites.BLUE, .35))
+                screen.blit(words, words.get_rect(midleft=(panel.x + 20 + place * 300, panel.y + 56)))
+        image = sprites.sign('One-player Treasure Dash times, wiped at midnight.  Press any key to go back.', 22, sprites.BLUE_BRIGHT)
+        screen.blit(image, image.get_rect(center=(width // 2, 706)))
 
     def draw_info():
         """How to play, with the numbers read from the rules actually in force."""
@@ -422,9 +421,10 @@ def main():
                          'A path that never reaches the chest loses on the spot')),
             ('2  RACE', ('Your beaver only walks while your laser traces the line just ahead of it' if not args.simulate
                          else 'Your beaver only walks while the mouse traces the line just ahead of it',
-                         'A rock on your line stops you there for good, so draw round them',
+                         'Rocks, trees and logs on your line stop you for good; a cow only until it wanders off',
                          'Ponds are allowed: you swim a bit slower, so a short swim can beat a long detour',
                          ('Click' if args.simulate else 'Either button') + f": a {rules['boost_seconds']:g} s speed boost, ready again after {rules['boost_cooldown']:g} s",
+                         'Matching portals join up: draw to one and carry on from the other. Tokens give a burst of speed',
                          'First beaver to the chest wins' if not (treasure.solo) else "Reach the chest as fast as you can: today's best times are kept per board")),
         )
         y = 170
@@ -547,7 +547,7 @@ def main():
                     if again_button.collidepoint(event.pos):
                         again = True
                     elif mode == 'treasure' and treasure.solo and next_button.collidepoint(event.pos):
-                        solo_board = (treasure.board_index + 1) % len(BOARDS)
+                        solo_board = (treasure.board_index + 1) % len(BOARDS + SOLO_BOARDS)
                         again = True
                     elif menu_button.collidepoint(event.pos):
                         mode, selection = ('home' if mode == 'treasure' else 'lobby'), 0
@@ -556,7 +556,7 @@ def main():
                     again = True
                     continue
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_n and mode == 'treasure' and treasure.solo and treasure.phase == 'match_over':
-                    solo_board, again = (treasure.board_index + 1) % len(BOARDS), True
+                    solo_board, again = (treasure.board_index + 1) % len(BOARDS + SOLO_BOARDS), True
                     continue
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and (playing or mode == 'pause'):
                     if pause_button.collidepoint(event.pos):

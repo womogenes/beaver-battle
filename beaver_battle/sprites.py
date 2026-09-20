@@ -637,3 +637,54 @@ def chest(size, zoom=1, open_lid=False):
     pen.ellipse(CHEST_DARK, (0, 2.5), 1.6, 2.4, outline=None)
     pen.stroke([(-21, -4), (21, -4)], INK, 2, closed=False)
     return pen.image()
+
+
+LEAF = (104, 176, 110)
+LEAF_LIGHT = (146, 204, 132)
+LEAF_DARK = (74, 140, 96)
+
+
+def tree(radius, seed=1, zoom=1):
+    """A tree from above: a lumpy canopy with a few lighter tufts."""
+    rng = random.Random(seed)
+    pen = Pen(72, 72, radius * zoom / 30, zoom)
+    lumps = [(0, 0, 22)] + [(19 * math.cos(a), 19 * math.sin(a), rng.uniform(11, 15)) for a in [index * math.tau / 7 + rng.uniform(-.2, .2) for index in range(7)]]
+    pen.union([(LEAF, pen.oval((x, y), r)) for x, y, r in lumps], 1.5, LEAF_DARK)
+    for x, y, r in ((-8, -9, 9), (9, 4, 7), (-4, 12, 6)):
+        pen.ellipse(LEAF_LIGHT, (x + rng.uniform(-2, 2), y + rng.uniform(-2, 2)), r, outline=None)
+    for x, y in ((-10, -11), (8, 2), (-3, 11), (12, -10)):
+        pen.ellipse(tint(LEAF_LIGHT, .45), (x, y), 2.4, outline=None)
+    return pen.image()
+
+
+COW_SPOT = (176, 132, 104)
+
+
+def cow(size, zoom=1):
+    """A cow from above, facing right: a white barrel of a body with patches, a pink nose and small horns."""
+    pen = Pen(86, 60, size * zoom / 26, zoom)
+    pen.line(CREAM, (-30, 0), (-38, 5), 2.2)
+    pen.ellipse(COW_SPOT, (-39, 6), 3, outline=None)
+    for x in (-13, 12):
+        for side in (-1, 1):
+            pen.ellipse(CREAM, (x, side * 17), 4.5, 5.5)
+    shapes = [(CREAM, pen.oval((-4, 0), 27, 18)), (CREAM, pen.oval((26, 0), 12, 11))]
+    shapes += [(CREAM, pen.oval((24, side * 12), 5, 3.2, side * .5)) for side in (-1, 1)]
+    pen.union(shapes, 1.6)
+    for x, y, rx, ry, turn in ((-14, -6, 10, 7, .3), (2, 8, 8, 6, -.4), (-22, 9, 5, 4, 0), (12, -9, 5, 4, .2)):
+        pen.ellipse(COW_SPOT, (x, y), rx, ry, turn, outline=None)
+    pen.ellipse(PINK, (34, 0), 5, 8, width=1.3)
+    for side in (-1, 1):
+        pen.ellipse(EYE, (35, side * 3), 1.1, outline=None)
+        pen.ellipse(EYE, (25, side * 5.5), 1.8, outline=None)
+        pen.poly(WOOD_LIGHT, [(19, side * 8), (22, side * 15), (24, side * 8.5)], INK, 1)
+    return pen.image()
+
+
+def boost_token(size, zoom=1):
+    """A gold coin with a lightning bolt: run over it for a burst of speed."""
+    pen = Pen(40, 40, size * zoom / 14, zoom)
+    pen.ellipse(GOLD, (0, 0), 15, width=1.3)
+    pen.ellipse(tint(GOLD, .55), (0, 0), 11, outline=None)
+    pen.poly(BLUE_BRIGHT, [(2.5, -10), (-6, 1.5), (-1, 1.5), (-3.5, 10), (6.5, -2.5), (1.2, -2.5)], None)
+    return pen.image()

@@ -27,16 +27,32 @@ BOARDS = [
                                       (.38, .30, .03), (.38, .53, .034), (.38, .76, .03), (.445, .42, .024), (.445, .64, .024)],
      "ponds": [(.12, .22, .06, .10), (.12, .84, .06, .10), (.29, .20, .05, .07), (.29, .86, .05, .07), (.29, .53, .05, .13), (.44, .53, .04, .10)]},
     {"name": "THE RIVER", "rocks": [(.24, .17, .026), (.36, .88, .026), (.42, .45, .028), (.42, .61, .028), (.17, .53, .03)],
-     "ponds": [(.30, .16, .022, .12), (.30, .36, .06, .14), (.30, .56, .075, .14), (.30, .76, .06, .14), (.30, .93, .022, .08)]},
+     "ponds": [(.30, .16, .022, .12), (.30, .36, .06, .14), (.30, .56, .075, .14), (.30, .76, .06, .14), (.30, .93, .022, .08)],
+     "portals": [((.19, .86), (.41, .84))]},
     {"name": "HORSESHOE", "rocks": [(.5 - .125 * math.cos(math.radians(a)), .53 + .222 * math.sin(math.radians(a)), .03) for a in (-52, -26, 0, 26, 52)]
      + [(.24, .30, .03), (.24, .76, .03)],
      "ponds": [(.5, .22, .10, .12), (.5, .84, .10, .12), (.30, .50, .05, .15), (.43, .30, .05, .08), (.43, .76, .05, .08)]},
     {"name": "STEPPING STONES", "rocks": [(.25, .67, .028), (.38, .37, .028), (.155, .53, .026), (.45, .66, .024)],
      "ponds": [(.25, .33, .085, .24), (.38, .75, .085, .24), (.12, .86, .06, .10)]},
     {"name": "BOULDER WALL", "rocks": [(.26, y, .03) for y in (.19, .42, .53, .64, .75, .86)] + [(.40, y, .028) for y in (.20, .31, .42, .53, .64, .86)],
-     "ponds": [(.32, .31, .05, .09), (.455, .75, .045, .09)]},
+     "ponds": [(.32, .31, .05, .09), (.455, .75, .045, .09)], "portals": [((.16, .22), (.445, .25))]},
     {"name": "THE MARSH", "rocks": [(.23, .53, .03), (.34, .36, .028), (.34, .70, .028), (.43, .53, .026)],
      "ponds": [(.17, .34, .06, .10), (.17, .72, .06, .10), (.28, .53, .04, .10), (.39, .20, .06, .09), (.39, .86, .06, .09), (.44, .40, .03, .06), (.44, .66, .03, .06)]},
+]
+
+# One player crosses the whole board, so these need not be symmetric: written edge to edge, never mirrored.
+SOLO_BOARDS = [
+    {"name": "THE BIG RIVER", "whole": True, "cows": 2,
+     "rocks": [(.25, .40, .04), (.30, .70, .04), (.72, .35, .04), (.70, .68, .04), (.40, .22, .035), (.62, .84, .035)],
+     "ponds": [(.5, .14, .055, .13), (.49, .34, .075, .15), (.51, .56, .085, .15), (.49, .78, .075, .15), (.5, .95, .055, .1), (.2, .8, .06, .09), (.8, .25, .06, .09)],
+     "portals": [((.34, .20), (.66, .86))]},
+    {"name": "COW PASTURE", "whole": True, "cows": 6, "boosts": 5,
+     "rocks": [(.22, .30, .035), (.35, .66, .035), (.5, .40, .04), (.64, .70, .035), (.78, .34, .035)],
+     "ponds": [(.30, .42, .06, .10), (.58, .56, .07, .11), (.74, .80, .06, .09), (.44, .84, .05, .08)]},
+    {"name": "PORTAL WOODS", "whole": True, "cows": 2, "trees": 4,
+     "rocks": [(.5, y, .034) for y in (.2, .31, .42, .64, .75, .86)] + [(.30, .53, .035), (.70, .53, .035)],
+     "ponds": [(.5, .53, .05, .08), (.36, .28, .06, .09), (.66, .80, .06, .09)],
+     "portals": [((.24, .84), (.60, .22)), ((.40, .20), (.78, .82))]},
 ]
 
 
@@ -47,8 +63,11 @@ def mirrored(items):
 def scattered(board, shrink):
     """Shrink a board's rocks and ponds and give each a smaller sibling, so the meadow is a fine-grained
     scatter rather than a few big lumps. Anything that would crowd a start pad or the chest is left out."""
+    whole = board.get("whole", False)
+
     def clear(x, y, reach):
-        return all(math.hypot((x - px) * 16 / 9, y - .53) > reach + .075 for px in (.085, .5)) and .16 < y < .93 and .13 < x <= .5
+        pads = (.085, .915) if whole else (.085, .5)
+        return all(math.hypot((x - px) * 16 / 9, y - .53) > reach + .075 for px in pads) and .16 < y < .93 and .13 < x <= (.87 if whole else .5)
 
     rocks, ponds = [], []
     for index, (x, y, r) in enumerate(board["rocks"]):
@@ -65,8 +84,9 @@ def scattered(board, shrink):
     return rocks, ponds, islands
 
 
-def cheapest_route(passable, cost, starts, goal, cell):
+def cheapest_route(passable, cost, starts, goal, cell, hops=None):
     """Dijkstra over a grid. passable and cost are 2-D arrays; starts are cells; goal is a bool grid.
+    hops maps a cell to the cell a portal sends it to, for next to nothing.
 
     Returns the route as board points, or None with the cell that came closest to the goal.
     """
@@ -93,8 +113,10 @@ def cheapest_route(passable, cost, starts, goal, cell):
             while route[-1] in came:
                 route.append(came[route[-1]])
             return [pygame.Vector2((cx + .5) * cell, (cy + .5) * cell) for cy, cx in reversed(route)], None
-        for dy, dx, step in ((1, 0, 1), (-1, 0, 1), (0, 1, 1), (0, -1, 1), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)):
-            ny, nx = y + dy, x + dx
+        moves = [(y + dy, x + dx, step) for dy, dx, step in ((1, 0, 1), (-1, 0, 1), (0, 1, 1), (0, -1, 1), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414))]
+        if hops and (y, x) in hops:
+            moves.append((*hops[(y, x)], .05))
+        for ny, nx, step in moves:
             if 0 <= ny < height and 0 <= nx < width and passable[ny, nx]:
                 total = spent + step * cost[ny, nx]
                 if total < best[ny, nx]:
@@ -113,6 +135,21 @@ def smoothed(points, rounds=2):
             rounded += [first * .75 + second * .25, first * .25 + second * .75]
         points = rounded + [points[-1]]
     return points
+
+
+def segment_distance(point, first, second):
+    along = second - first
+    if not along.length_squared():
+        return point.distance_to(first)
+    return point.distance_to(first + along * max(0.0, min(1.0, (point - first).dot(along) / along.length_squared())))
+
+
+@dataclass
+class Cow:
+    pos: pygame.Vector2
+    target: pygame.Vector2
+    wait: float = 0.0
+    facing: float = 1.0
 
 
 @dataclass
@@ -136,6 +173,9 @@ class Runner:
     plan: list | None = None
     drawn: float = 0.0
     lapse: float = 0.0
+    jumps: list = field(default_factory=list)  # Distances along the route at which a portal is taken.
+    moo: float = 0.0
+    held: bool = False
 
 
 @dataclass
@@ -150,6 +190,12 @@ class Treasure:
     board_index: int = -1
     board: dict = field(default_factory=dict)
     rocks: list = field(default_factory=list)
+    trees: list = field(default_factory=list)
+    logs: list = field(default_factory=list)
+    portals: list = field(default_factory=list)
+    boosts: list = field(default_factory=list)
+    cows: list = field(default_factory=list)
+    matches: int = 0
     water: np.ndarray | None = None
     chest: pygame.Vector2 = field(default_factory=pygame.Vector2)
     runners: dict = field(default_factory=dict)
@@ -184,28 +230,103 @@ class Treasure:
         game = self.config.get("game", {})
         self.width, self.height = int(game.get("width", 1280)), int(game.get("height", 720))
         self.scale = min(self.width / 1280, self.height / 720)
-        self.rng = random.Random(self.setting("seed", 7) + self.board_index + 1)
-        self.board_index = (self.board_index + 1) % len(BOARDS) if board is None else board % len(BOARDS)
-        self.board = BOARDS[self.board_index]
+        boards = self.board_list(solo)
+        self.board_index = (self.board_index + 1) % len(boards) if board is None else board % len(boards)
+        self.board = boards[self.board_index]
+        whole = self.board.get("whole", False)
+        self.matches += 1
+        # One player's boards are the same for everyone, so today's times compare; a duel is dressed afresh each match.
+        self.rng = random.Random(self.setting("seed", 7) + self.board_index * 101 + (0 if solo else self.matches))
         self.bots, self.art, self.particles, self.sounds = set(bots), {}, [], []
         self.chest = pygame.Vector2(self.width * (.915 if solo else .5), self.height * .53)
         rocks, ponds, islands = scattered(self.board, self.setting("object_scale", .62))
-        self.rocks = [(pygame.Vector2(x * self.width, y * self.height), r * self.width) for x, y, r in mirrored(rocks)]
+        self.rocks = [(pygame.Vector2(x * self.width, y * self.height), r * self.width) for x, y, r in (rocks if whole else mirrored(rocks))]
         layers = []
         for shapes in (ponds, islands):
             layer = np.zeros((self.height, self.width), np.uint8)
             for x, y, rx, ry in shapes:
                 cv2.ellipse(layer, (round(x * self.width), round(y * self.height)), (round(rx * self.width), round(ry * self.height)), 0, 0, 360, 1, -1)
-            layers.append(layer.astype(bool) | layer.astype(bool)[:, ::-1])  # Mirrored to the pixel, so neither side is favoured.
+            # A duel is mirrored to the pixel, so neither side is favoured.
+            layers.append(layer.astype(bool) if whole else layer.astype(bool) | layer.astype(bool)[:, ::-1])
         self.water = layers[0] & ~layers[1]
+        self.portals = []
+        for index, ((ax, ay), (bx, by)) in enumerate(self.board.get("portals", [])):
+            for flip in ((False,) if whole else (False, True)):
+                ends = [pygame.Vector2((1 - x if flip else x) * self.width, y * self.height) for x, y in ((ax, ay), (bx, by))]
+                self.portals.append((ends[0], ends[1], index))
         self.runners = {}
         for player_id, x in zip(ids, (.085, .915)):
             start = pygame.Vector2(x * self.width, self.height * .53)
             self.runners[player_id] = Runner(player_id, start, start.copy(), np.zeros((self.height, self.width), bool), facing=1 if x < .5 else -1)
         self.winner, self.verdict, self.clock, self.camera_ink = None, "", 0.0, False
+        self.decorate(whole)
         # With one cursor the humans take turns to draw; with markers on a board everybody draws at once.
         self.drawing = [player_id for player_id in ids if player_id not in self.bots]
         self.begin_drawing()
+
+    def board_list(self, solo):
+        return BOARDS + SOLO_BOARDS if solo else BOARDS
+
+    def decorate(self, whole):
+        """Scatter trees, logs, boost clusters and cows. In a duel the fixed things are placed on one half
+        and mirrored; cows wander, so they are simply dropped anywhere. Nothing may seal a beaver in."""
+        unit, rng = self.scale, self.rng
+        self.trees, self.logs, self.boosts, self.cows = [], [], [], []
+        pads = [runner.start for runner in self.runners.values()] + [self.chest, pygame.Vector2(self.width - self.chest.x, self.chest.y)]
+
+        def spot(reach, everywhere=False, dry=False):
+            for attempt in range(60):
+                point = pygame.Vector2(rng.uniform(.14, .86 if whole or everywhere else .5) * self.width, rng.uniform(.18, .92) * self.height)
+                crowded = any(point.distance_to(pad) < 100 * unit + reach for pad in pads) or any(point.distance_to(end) < 60 * unit + reach for a, b, index in self.portals for end in (a, b))
+                if not crowded and self.blocked_at(point, reach + 34 * unit) is None and not (dry and self.in_water(point)):
+                    return point
+            return None
+
+        def twins(point):
+            return [point] if whole else [point, pygame.Vector2(self.width - point.x, point.y)]
+
+        half = 2 if whole else 1
+        for index in range(self.board.get("trees", self.setting("trees", 3)) * half):
+            radius = rng.uniform(24, 32) * unit
+            point = spot(radius, dry=True)
+            if point is not None:
+                self.trees += [(twin, radius) for twin in twins(point)]
+                if not self.passable():
+                    del self.trees[-len(twins(point)):]
+        for index in range(self.board.get("logs", self.setting("logs", 2)) * half):
+            point, angle, reach = spot(50 * unit), rng.uniform(0, math.pi), rng.uniform(34, 52) * unit
+            if point is not None:
+                arm = pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
+                pairs = [(point - arm, point + arm)] if whole else [(point - arm, point + arm), (pygame.Vector2(self.width - (point - arm).x, (point - arm).y), pygame.Vector2(self.width - (point + arm).x, (point + arm).y))]
+                self.logs += [(first, second, 10 * unit) for first, second in pairs]
+                if not self.passable():
+                    del self.logs[-len(pairs):]
+        for index in range(self.board.get("boosts", self.setting("boost_clusters", 2)) * half):
+            point, angle = spot(30 * unit), rng.uniform(0, math.tau)
+            if point is not None:
+                for step in (-1, 0, 1):
+                    token = point + pygame.Vector2(math.cos(angle), math.sin(angle)) * step * 30 * unit
+                    self.boosts += [[twin, True] for twin in twins(token)]
+        for index in range(self.board.get("cows", self.setting("cows", 2))):
+            point = spot(30 * unit, everywhere=True, dry=True)
+            if point is not None:
+                self.cows.append(Cow(point, point.copy(), rng.uniform(0, 2)))
+
+    def passable(self):
+        return all(len(self.bot_plan(runner)) > 2 for runner in self.runners.values())
+
+    def blocked_at(self, point, slack=0.0):
+        """A rock, a tree trunk or a log in the way. Art is rough, so a line may graze an edge and get by."""
+        for center, radius in self.rocks:
+            if point.distance_to(center) < radius * .82 + slack:
+                return center
+        for center, radius in self.trees:
+            if point.distance_to(center) < radius * .62 + slack:
+                return center
+        for first, second, half in self.logs:
+            if segment_distance(point, first, second) < half * .9 + slack:
+                return (first + second) / 2
+        return None
 
     def begin_drawing(self):
         self.phase, self.timer = "drawing", self.setting("draw_seconds", 30)
@@ -233,9 +354,15 @@ class Treasure:
         cell = 8
         rows, columns = self.height // cell, self.width // cell
         ys, xs = np.mgrid[0:rows, 0:columns]
-        free = np.ones((rows, columns), bool)
+        solid = np.zeros((self.height, self.width), np.uint8)
+        margin = 16 * self.scale
         for center, radius in self.rocks:
-            free &= np.hypot(xs * cell + cell / 2 - center.x, ys * cell + cell / 2 - center.y) > radius + 16 * self.scale
+            cv2.circle(solid, (round(center.x), round(center.y)), round(radius + margin), 1, -1)
+        for center, radius in self.trees:
+            cv2.circle(solid, (round(center.x), round(center.y)), round(radius * .62 + margin), 1, -1)
+        for first, second, half in self.logs:
+            cv2.line(solid, (round(first.x), round(first.y)), (round(second.x), round(second.y)), 1, round(2 * (half + margin)))
+        free = solid[cell // 2::cell, cell // 2::cell][:rows, :columns] == 0
         free[:round(70 * self.scale / cell)] = False
         free[-2:], free[:, :2], free[:, -2:] = False, False, False
         # A bot weighs water by what it really costs in time, so it swims when swimming is quicker.
@@ -278,10 +405,32 @@ class Treasure:
         starts = [tuple(cell_index) for cell_index in np.argwhere(home & small)]
         if not starts:
             return None, runner.start.copy()
-        route, missed = cheapest_route(small, cost, starts, goal & small, cell)
+        # Ink that reaches one end of a portal carries on from ink at the other end.
+        hops = {}
+        for first, second, index in self.portals:
+            for here, there in ((first, second), (second, first)):
+                inside = np.argwhere((np.hypot(xs * cell - here.x, ys * cell - here.y) < 24 * self.scale) & small)
+                landing = np.argwhere((np.hypot(xs * cell - there.x, ys * cell - there.y) < 24 * self.scale) & small)
+                if len(inside) and len(landing):
+                    arrive = min(landing, key=lambda spot: math.hypot(spot[1] * cell - there.x, spot[0] * cell - there.y))
+                    hops.update({tuple(spot): (int(arrive[0]), int(arrive[1])) for spot in inside})
+        route, missed = cheapest_route(small, cost, starts, goal & small, cell, hops)
         if route is None:
             return None, missed
-        return smoothed([runner.start.copy()] + route[::3] + [self.chest.copy()], 2), None
+        # A hop shows up as two neighbours far apart: keep the pieces separate so smoothing cannot bridge them.
+        pieces = [[route[0]]]
+        for before, after in zip(route, route[1:]):
+            if before.distance_to(after) > cell * 3:
+                pieces.append([])
+            pieces[-1].append(after)
+        pieces[0].insert(0, runner.start.copy())
+        pieces[-1].append(self.chest.copy())
+        line, runner.jumps = [], []
+        for piece in pieces:
+            if line:
+                runner.jumps.append(len(line) - 1)  # The segment from this index to the next is the hop.
+            line += smoothed([piece[0]] + piece[1:-1:3] + [piece[-1]], 2) if len(piece) > 2 else piece
+        return line, None
 
     def judge(self, camera_ink=None):
         self.phase, self.timer = "checking", self.setting("check_seconds", 2.6)
@@ -291,8 +440,9 @@ class Treasure:
             runner.state = "waiting" if runner.route else "broken"
             if runner.route:
                 runner.marks = [0.0]
-                for first, second in zip(runner.route, runner.route[1:]):
-                    runner.marks.append(runner.marks[-1] + first.distance_to(second))
+                for index, (first, second) in enumerate(zip(runner.route, runner.route[1:])):
+                    runner.marks.append(runner.marks[-1] + (0.0 if index in runner.jumps else first.distance_to(second)))
+                runner.jumps = [runner.marks[index] for index in runner.jumps]
         self.sounds.append("broken" if any(runner.state == "broken" for runner in self.runners.values()) else "ready")
 
     def point_at(self, runner, distance):
@@ -315,6 +465,8 @@ class Treasure:
             particle[3] += 420 * self.scale * dt
             particle[4] -= dt
         self.particles = [particle for particle in self.particles if particle[4] > 0][-400:]
+        if self.phase != "match_over":
+            self.update_cows(dt)
         if self.phase == "drawing":
             self.update_drawing(dt, inputs, ink)
         elif self.phase == "checking":
@@ -323,6 +475,30 @@ class Treasure:
                 self.start_running()
         elif self.phase == "running":
             self.update_running(dt, inputs)
+
+    def update_cows(self, dt):
+        """Cows amble from one patch of grass to the next, stopping to graze. They go where they like."""
+        unit = self.scale
+        pads = [runner.start for runner in self.runners.values()] + [self.chest]
+        for cow in self.cows:
+            if cow.wait > 0:
+                cow.wait -= dt
+                continue
+            gap = cow.target - cow.pos
+            if gap.length() < 3 * unit:
+                cow.wait = self.rng.uniform(.6, 2.6)
+                for attempt in range(12):
+                    angle, reach = self.rng.uniform(0, math.tau), self.rng.uniform(70, 230) * unit
+                    target = cow.pos + pygame.Vector2(math.cos(angle), math.sin(angle)) * reach
+                    roomy = 60 * unit < target.x < self.width - 60 * unit and 100 * unit < target.y < self.height - 50 * unit
+                    way = [cow.pos.lerp(target, step / 8) for step in range(1, 9)]
+                    if roomy and not any(self.in_water(point) or self.blocked_at(point, 22 * unit) is not None for point in way) \
+                            and all(target.distance_to(pad) > 90 * unit for pad in pads):
+                        cow.target = target
+                        break
+                continue
+            cow.facing = 1 if gap.x >= 0 else -1
+            cow.pos += gap.normalize() * min(gap.length(), self.setting("cow_speed", 24) * unit * dt)
 
     def update_drawing(self, dt, inputs, ink):
         before = math.ceil(self.timer)
@@ -376,7 +552,8 @@ class Treasure:
         for runner in self.runners.values():
             if runner.state in ("stuck", "home"):
                 continue
-            runner.boost, runner.cooldown = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt)
+            runner.boost, runner.cooldown, runner.moo = max(0.0, runner.boost - dt), max(0.0, runner.cooldown - dt), max(0.0, runner.moo - dt)
+            runner.held = False
             if runner.player_id in self.bots:
                 aim, special = self.bot_trace(runner, dt)
             else:
@@ -403,10 +580,22 @@ class Treasure:
             pace *= self.setting("solo_pace", 1.5) if self.solo else 1  # Twice the distance, so a brisker beaver.
             ahead = min(target, runner.travelled + pace * dt)
             place = self.point_at(runner, ahead)
-            if self.rock_at(place, 5 * self.scale) is not None:
+            if self.blocked_at(place, 5 * self.scale) is not None:
                 runner.state = "stuck"
                 self.sounds.append("bonk")
                 continue
+            if any(cow.pos.distance_to(place) < 30 * self.scale and cow.pos.distance_to(place) < cow.pos.distance_to(runner.pos) for cow in self.cows):
+                # A cow in the way: wait for it to wander off. Unlike a rock, it will.
+                runner.held = True
+                if runner.moo == 0:
+                    runner.moo = 1.6
+                    self.sounds.append("moo")
+                continue
+            for mark in runner.jumps:
+                if runner.travelled <= mark < ahead:
+                    self.sounds.append("warp")
+                    for end in (self.point_at(runner, mark - .5), place):
+                        self.sparkle(end, 16)
             if place.x != runner.pos.x:
                 runner.facing = 1 if place.x > runner.pos.x else -1
             runner.stride += (ahead - runner.travelled)
@@ -416,6 +605,12 @@ class Treasure:
                 if swimming:
                     self.splash(place, 7)
             runner.travelled, runner.pos = ahead, place
+            for token in self.boosts:
+                if token[1] and token[0].distance_to(place) < 24 * self.scale:
+                    token[1] = False
+                    runner.boost = max(runner.boost, self.setting("token_boost", 1.2))
+                    self.sounds.append("zip")
+                    self.sparkle(token[0], 10)
             if runner.travelled >= runner.marks[-1] - 1:
                 runner.state = "home"
                 self.finish(runner.player_id, f"{self.race_time:.2f} s" if self.solo else "TREASURE!")
@@ -455,6 +650,11 @@ class Treasure:
             speed = self.rng.uniform(60, 200) * self.scale
             self.particles.append([point.x, point.y, speed * math.cos(angle), speed * math.sin(angle), self.rng.uniform(.3, .6), self.rng.uniform(3, 6) * self.scale])
 
+    def sparkle(self, point, count):
+        for index in range(count):
+            angle, speed = self.rng.uniform(0, math.tau), self.rng.uniform(80, 240) * self.scale
+            self.particles.append([point.x, point.y, speed * math.cos(angle), speed * math.sin(angle) - 120 * self.scale, self.rng.uniform(.3, .6), self.rng.uniform(3, 5) * self.scale])
+
     def finish(self, winner, verdict):
         self.phase, self.winner, self.verdict = "match_over", winner, verdict
         self.sounds.append("treasure" if winner is not None else "broken")
@@ -483,9 +683,17 @@ class Treasure:
             pixels[:] = cv2.GaussianBlur(alpha, (5, 5), 0).T
             del pixels
             surface.blit(sheet, (0, 0))
+        for first, second, half in self.logs:
+            along = second - first
+            image = sprites.log(along.length() / unit + 2 * half / unit, 2.2 * half / unit, unit, seed=round(first.x + first.y))
+            image = pygame.transform.rotozoom(image, -math.degrees(math.atan2(along.y, along.x)), 1)
+            surface.blit(image, image.get_rect(center=(first + second) / 2))
         for index, (center, radius) in enumerate(self.rocks):
             rock = sprites.boulder(radius * .95, index + self.board_index * 17)
             surface.blit(rock, rock.get_rect(center=center))
+        for index, (center, radius) in enumerate(self.trees):
+            canopy = sprites.tree(radius, index + self.board_index * 7)
+            surface.blit(canopy, canopy.get_rect(center=center))
         return surface
 
     def draw(self, surface):
@@ -493,6 +701,21 @@ class Treasure:
         frame = self.sprite(("frame",), lambda: pygame.Surface((self.width, self.height), 0, 24))
         frame.blit(self.sprite(("ground",), self.ground), (0, 0))
         colors = {player_id: sprites.PLAYER_COLORS[player_id - 1] for player_id in self.runners}
+        for first, second, index in self.portals:
+            # A pair of portals shares a colour and spins the same way, so it is plain which leads where.
+            shade = (sprites.LAVENDER, sprites.PINK, sprites.BUTTER)[index % 3]
+            for end in (first, second):
+                for ring, reach in enumerate((26, 18, 10)):
+                    pygame.draw.circle(frame, sprites.INK, end, (reach + 3) * unit)
+                    pygame.draw.circle(frame, shade if ring % 2 == 0 else sprites.WHITE, end, reach * unit)
+                for spoke in range(3):
+                    angle = self.clock * 3.2 + spoke * math.tau / 3
+                    pygame.draw.circle(frame, sprites.INK, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 5 * unit)
+                    pygame.draw.circle(frame, sprites.WHITE, end + pygame.Vector2(math.cos(angle), math.sin(angle)) * 18 * unit, 3 * unit)
+        token = self.sprite(("token",), lambda: sprites.boost_token(16 * unit))
+        for index, (place, alive) in enumerate(self.boosts):
+            if alive:
+                frame.blit(token, token.get_rect(center=place + pygame.Vector2(0, 3 * unit * math.sin(self.clock * 5 + index))))
         for runner in self.runners.values():
             color = colors[runner.player_id]
             pygame.draw.circle(frame, sprites.INK, runner.start, 26 * unit)
@@ -513,6 +736,10 @@ class Treasure:
         chest = self.sprite(("chest", self.phase == "match_over" and self.winner is not None),
                             lambda: sprites.chest(48 * unit, open_lid=self.phase == "match_over" and self.winner is not None))
         frame.blit(chest, chest.get_rect(center=self.chest + pygame.Vector2(0, -4 * unit * abs(math.sin(self.clock * 2.4)))))
+        for cow in self.cows:
+            image = self.sprite(("cow", cow.facing), lambda: pygame.transform.flip(sprites.cow(24 * unit), cow.facing < 0, False))
+            walking = cow.wait <= 0
+            frame.blit(image, image.get_rect(center=cow.pos + pygame.Vector2(0, 1.5 * unit * math.sin(self.clock * 8 + cow.pos.x) if walking else 0)))
         for runner in self.runners.values():
             self.draw_beaver(frame, runner, colors[runner.player_id])
         for x, y, vx, vy, life, size in self.particles:
@@ -541,6 +768,9 @@ class Treasure:
         pygame.draw.rect(frame, sprites.INK, plate.inflate(5 * unit, 5 * unit), border_radius=round(14 * unit))
         pygame.draw.rect(frame, sprites.tint(color, .45), plate, border_radius=round(12 * unit))
         frame.blit(word, word.get_rect(center=plate.center))
+        if runner.held:
+            moo = sprites.sign("MOO!", max(14, round(24 * unit)))
+            frame.blit(moo, moo.get_rect(center=center + pygame.Vector2(0, 30 * unit)))
         if runner.state == "stuck":
             stuck = sprites.sign("STUCK!", max(14, round(26 * unit)))
             frame.blit(stuck, stuck.get_rect(center=center + pygame.Vector2(0, 30 * unit)))
