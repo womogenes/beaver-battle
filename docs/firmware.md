@@ -483,3 +483,10 @@ The receiver firmware uses no controller GPIO or servo outputs. Legacy Arduino
 controllers and receivers still carry input, but do not gain feedback until both
 ends are upgraded. Broadcast command delivery is best-effort; the relay's periodic
 resends and event IDs provide retry and duplicate suppression.
+
+Bench validation (2026-09-20): receiver and both controller images were flashed with
+hash verification. A command through the physical receiver was acknowledged by
+controller 2; its log showed 570 µs followed 500 ms later by 990 µs. The receiver
+reported zero dropped packets and send failures. This verifies radio delivery and
+firmware PWM targets, not measured shaft travel or water dispensing. Controller 1
+radio input was observed after flashing; its physical squeeze remains to be observed.
