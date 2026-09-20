@@ -10,6 +10,7 @@ import numpy as np
 import pygame
 
 from beaver_battle import sprites
+from beaver_battle.juice import Juice
 from beaver_battle.model import FeedbackEvent, PlayerInput
 
 
@@ -35,6 +36,7 @@ class Player:
     joust: float = 0.0
     bounce: float = 0.0
     bounce_heading: float = 0.0
+    knock: pygame.Vector2 = field(default_factory=pygame.Vector2)
 
 
 @dataclass
@@ -77,6 +79,8 @@ class Pickup:
     velocity: pygame.Vector2
     radius: float
     lifetime: float = 20.0
+    charm: float = 0.0
+    target: int | None = None
 
 
 @dataclass
@@ -398,6 +402,9 @@ class Game:
     shapes: list[Shape] = field(default_factory=list)
     shape_art: list | None = None
     sounds: list[str] = field(default_factory=list)
+    fx: list = field(default_factory=list)
+    freeze: float = 0.0
+    juice: Juice | None = None
     ink_art: object = None
     bridges: dict = field(default_factory=dict)
     wall_tick: int = 0
@@ -443,6 +450,7 @@ class Game:
 
     def new_round(self):
         self.phase = "playing"
+        self.fx.append(("reset", None))
         self.time = 0.0
         self.round_timer = 0.0
         self.winner = None
@@ -686,12 +694,21 @@ class Game:
                 closest, hit = fraction, target
         return start + delta * closest, hit
 
-    def hit(self, target, damage=1):
+    def hit(self, target, damage=1, push=None, by=None):
+        push = pygame.Vector2(push).normalize() if push is not None and pygame.Vector2(push).length_squared() else pygame.Vector2()
         if isinstance(target, Player):
             if target.state == "eliminated" or target.invulnerability > 0:
                 return False
             target.state = "beaver" if target.state == "canoe" else "eliminated"
-            self.sounds.append("hit" if target.state == "beaver" else "splash")
+            sunk = target.state == "eliminated"
+            final = sunk and sum(player.state != "eliminated" for player in self.players.values()) <= 1
+            self.sounds.append("splash" if sunk else "hit")
+            if sunk:
+                self.sounds.append("whoosh")
+            # One hit should land like a truck: freeze the world, then throw the victim.
+            self.freeze = max(self.freeze, self.setting("hit_stop", .09) * (1.7 if sunk else 1))
+            target.knock = push * self.setting("knockback", 560) * self.scale
+            self.fx.append(("sink" if sunk else "hit", target.pos.copy(), push, target.player_id, by, final))
             target.radius = 10 * self.scale
             target.speed = self.setting("beaver_speed", 75) * self.scale
             target.invulnerability = self.setting("invulnerability", .8)
@@ -705,6 +722,7 @@ class Game:
         if isinstance(target, Prop) and target.hp > 0:
             target.hp -= damage
             self.sounds.append("thud" if target.hp > 0 else "crack")
+            self.fx.append(("chip", target.pos.copy()))
             if target.hp <= 0 and target.kind in ("barrel", "asteroid"):
                 if not self.drop_bag:
                     self.drop_bag = ["laser", "jouster", "mine"]
@@ -724,10 +742,11 @@ class Game:
     def shoot(self, owner, pos, heading, radius, ignore=None):
         forward = direction(heading)
         self.sounds.append("shoot")
+        self.fx.append(("shoot", pos + forward * radius, owner, heading))
         start = pos + forward * (radius + 6 * self.scale)
         end, blocker = self.trace(pos, start, 4 * self.scale, owner=owner, ignore=ignore)
         if blocker is not None:
-            self.hit(blocker)
+            self.hit(blocker, push=forward, by=owner)
         else:
             self.rocks.append(Rock(owner, start, forward * self.setting("rock_speed", 650) * self.scale,
                                    4 * self.scale, self.setting("rock_lifetime", 2)))
@@ -739,7 +758,7 @@ class Game:
         if kind == "laser":
             end, target = self.trace(player.pos, player.pos + direction(player.heading) * self.width * 2,
                                      2 * self.scale, owner=player.player_id)
-            self.hit(target, 3)
+            self.hit(target, 3, direction(player.heading), player.player_id)
             self.effects.append(Effect("laser", player.pos.copy(), end, .15))
             self.sounds.append("laser")
         elif kind == "jouster":
@@ -756,6 +775,7 @@ class Game:
     def explode(self, mine):
         mine.active = False
         self.sounds.append("boom")
+        self.fx.append(("boom", mine.pos.copy()))
         radius = 90 * self.scale
         self.effects.append(Effect("explosion", mine.pos.copy(), pygame.Vector2(radius, 0), .3))
         targets = [player for player in self.players.values()
@@ -767,13 +787,14 @@ class Game:
                 continue
             end, blocker = self.trace(mine.pos, target.pos, players=False, ignore=target)
             if blocker is None:
-                self.hit(target, 3)
+                self.hit(target, 3, target.pos - mine.pos, mine.owner)
 
     def update(self, dt, inputs, walls=None):
         if not math.isfinite(dt) or not 0 <= dt <= 10:
             raise ValueError("Game dt must be finite and between zero and ten seconds")
         self.events = []
         del self.sounds[:-32]
+        del self.fx[:-64]
         if walls is not None and self.replace_walls(walls):
             self.resolve_walls()
         if self.blocked or self.phase == "match_over":
@@ -785,6 +806,16 @@ class Game:
             if self.blocked or self.phase == "match_over":
                 break
         return self.events
+
+    def held(self, dt):
+        """Hit-stop: after a hit the caller skips a few simulation steps so the blow can land.
+
+        It lives outside update() so the simulation itself stays a pure function of its inputs.
+        """
+        if self.freeze <= 0:
+            return False
+        self.freeze = max(0.0, self.freeze - dt)
+        return True
 
     def advance(self, dt, controls):
         if self.phase == "round_over":
@@ -829,9 +860,12 @@ class Game:
             if rebound != velocity and rebound.length_squared():
                 if player.bounce == 0:
                     self.sounds.append("bump")
+                    self.fx.append(("bump", player.pos + direction(player.heading) * player.radius))
                 # Glance off smoothly: slide along the obstacle while the bow swings round to the rebound heading.
                 player.bounce = .3
                 player.bounce_heading = math.atan2(rebound.y, rebound.x)
+            if player.knock.length_squared() > 4:
+                player.knock = self.move(player, player.knock, dt) * .0009 ** dt
             if fire and player.state == "canoe" and player.reload == 0 and player.cooldown == 0:
                 self.shoot(player.player_id, player.pos, player.heading, player.radius)
                 player.ammo -= 1
@@ -847,7 +881,7 @@ class Game:
                                          7 * self.scale, owner=player.player_id)
                 if target is not None and target != "wall":
                     self.sounds.append("ram")
-                    self.hit(target, 3)
+                    self.hit(target, 3, direction(player.heading), player.player_id)
                     player.joust = 0
         for prop in self.props:
             if prop.hp > 0 and prop.velocity.length_squared():
@@ -856,6 +890,12 @@ class Game:
         self.update_hazards(dt)
         self.update_pickups(dt)
         self.update_mines(dt)
+        self.settle()
+
+    def settle(self):
+        """Award the round as soon as one canoe is left, even in the middle of a hit-stop."""
+        if self.phase != "playing":
+            return
         survivors = [player.player_id for player in self.players.values() if player.state != "eliminated"]
         if len(self.players) > 1 and len(survivors) <= 1:
             self.winner = survivors[0] if survivors else None
@@ -863,6 +903,7 @@ class Game:
                 self.scores[self.winner] += 1
             self.phase = "match_over" if self.winner is not None and self.scores[self.winner] >= self.setting("winning_score", 5) else "round_over"
             self.sounds.append("fanfare" if self.phase == "match_over" else "win")
+            self.fx.append(("round", None, self.winner, self.phase == "match_over"))
             self.round_timer = self.setting("round_delay", 3)
 
     def update_rocks(self, dt):
@@ -872,7 +913,8 @@ class Game:
             rock.pos = end
             rock.lifetime -= dt
             if target is not None:
-                self.hit(target)
+                if not self.hit(target, push=rock.velocity, by=rock.owner):
+                    self.fx.append(("chip", end.copy()))
             elif rock.lifetime > 0:
                 remaining.append(rock)
         self.rocks = remaining
@@ -918,15 +960,30 @@ class Game:
         remaining = []
         for pickup in self.pickups:
             pickup.lifetime -= dt
-            pickup.velocity = self.move(pickup, pickup.velocity, dt)
-            collected = False
-            for player in self.players.values():
-                if player.state == "canoe" and player.powerup is None and player.pos.distance_to(pickup.pos) <= player.radius + pickup.radius:
-                    player.powerup = pickup.kind
-                    self.sounds.append("pickup")
-                    collected = True
-                    break
-            if not collected and pickup.lifetime > 0:
+            takers = [player for player in self.players.values() if player.state == "canoe" and player.powerup is None]
+            taker = next((player for player in takers if player.player_id == pickup.target), None)
+            if taker is None or taker.pos.distance_to(pickup.pos) > 200 * self.scale:
+                # Nobody has it yet: lock on to the nearest canoe that strays close.
+                pickup.target, pickup.charm = None, 0.0
+                taker = min(takers, key=lambda player: player.pos.distance_squared_to(pickup.pos), default=None)
+                if taker is not None and taker.pos.distance_to(pickup.pos) <= 125 * self.scale:
+                    pickup.target = taker.player_id
+                    self.sounds.append("charm")
+                else:
+                    taker = None
+            if taker is None:
+                pickup.velocity = self.move(pickup, pickup.velocity, dt)
+            else:
+                # Pulse on the spot for a beat, then zip to the canoe, faster the longer it flies.
+                pickup.charm += dt
+                gap = taker.pos - pickup.pos
+                if pickup.charm > .22 and gap.length_squared():
+                    pickup.pos += gap.normalize() * min(gap.length(), (520 + 3200 * (pickup.charm - .22)) * self.scale * dt)
+            if taker is not None and taker.pos.distance_to(pickup.pos) <= taker.radius + pickup.radius:
+                taker.powerup = pickup.kind
+                self.sounds.append("pickup")
+                self.fx.append(("pickup", taker.pos.copy(), taker.player_id, pickup.kind))
+            elif pickup.lifetime > 0:
                 remaining.append(pickup)
         self.pickups = remaining
 
@@ -990,11 +1047,27 @@ class Game:
         return (topleft[0] + 1.6 * self.scale * math.sin(self.time * 1.9 + index * 2.1),
                 topleft[1] + 1.6 * self.scale * math.cos(self.time * 1.4 + index * 1.3))
 
+    def portrait(self, player_id):
+        color = COLORS[player_id - 1]
+        def build():
+            ring, head = sprites.swimmer(10 * self.scale, color), sprites.tim(14.5 * self.scale, paws=False)
+            image = pygame.Surface(ring.get_size(), pygame.SRCALPHA)
+            image.blit(ring, (0, 0))
+            image.blit(head, head.get_rect(center=image.get_rect().center))
+            return image
+        return self.sprite(("portrait", player_id), build)
+
     def draw(self, surface):
         surface.fill(WATER)
         if not self.players:
             return
         unit = self.scale
+        if self.juice is None:
+            self.juice = Juice(unit)
+        juice = self.juice
+        juice.step(self)
+        screen, surface = surface, self.sprite(("canvas",), lambda: pygame.Surface((self.width, self.height)))
+        surface.fill(WATER)
         for index, pad in enumerate(self.pads):
             image = self.sprite(("pad", index), lambda: sprites.lily_pad(16 * unit, degrees=index * 67, flower=index % 3 != 2))
             surface.blit(image, self.bob(index + 20, image.get_rect(center=pad).topleft))
@@ -1041,8 +1114,12 @@ class Game:
                 center = (pos.x + (pip - (prop.hp - 1) / 2) * 9 * unit, pos.y + radius + 10 * unit)
                 pygame.draw.circle(surface, INK, center, max(2, round(4 * unit)))
                 pygame.draw.circle(surface, sprites.CREAM, center, max(1, round(2.2 * unit)))
+        juice.draw_under(surface)
         for pickup in self.pickups:
             bob = 1 + .06 * math.sin(self.time * 4 + pickup.pos.x)
+            if pickup.target is not None:
+                # Charmed: swell and throb before it leaps.
+                bob = 1 + .45 * min(1, pickup.charm / .22) + .12 * math.sin(pickup.charm * 55)
             self.stamp(surface, self.sprite(("pickup", pickup.kind, round(bob, 2)), lambda: sprites.pickup(pickup.radius * bob, pickup.kind)), pickup.pos)
         for mine in self.mines:
             armed = mine.age >= .6
@@ -1062,14 +1139,29 @@ class Game:
             if sprite:
                 image = pygame.transform.smoothscale(sprite, (max(1, round(player.radius * 3)), max(1, round(player.radius * 2))))
                 self.stamp(surface, image, player.pos, player.heading)
-            elif player.state == "canoe":
-                if player.joust:
-                    self.stamp(surface, self.sprite(("horn",), lambda: sprites.horn(54 * unit)), player.pos + forward * (player.radius * 2.2 + 20 * unit), player.heading)
-                self.stamp(surface, self.sprite(("canoe", color, player.radius), lambda: sprites.canoe(player.radius, color)), player.pos, player.heading)
-                self.stamp(surface, self.sprite(("tim", player.radius), lambda: sprites.tim(player.radius * 1.05)), player.pos - forward * 2 * unit)
             else:
-                self.stamp(surface, self.sprite(("swimmer", color, player.radius), lambda: sprites.swimmer(player.radius, color)), player.pos, player.heading)
-                self.stamp(surface, self.sprite(("tim", player.radius), lambda: sprites.tim(player.radius * 1.45, paws=False)), player.pos)
+                # Lean into turns, squash on recoil and impact, and spin away when hit.
+                body = juice.body(player.player_id)
+                lean, squash, spin = (body.lean, body.squash, body.spin) if body else (0, 0, 0)
+                whirl = spin * spin * math.tau * 2
+                side = direction(player.heading + math.pi / 2)
+                if player.state == "canoe":
+                    if player.joust:
+                        self.stamp(surface, self.sprite(("horn",), lambda: sprites.horn(54 * unit)), player.pos + forward * (player.radius * 2.2 + 20 * unit), player.heading)
+                    hull = self.sprite(("canoe", color, player.radius), lambda: sprites.canoe(player.radius, color))
+                    head = self.sprite(("tim", player.radius), lambda: sprites.tim(player.radius * 1.05))
+                else:
+                    hull = self.sprite(("swimmer", color, player.radius), lambda: sprites.swimmer(player.radius, color))
+                    head = self.sprite(("tim", player.radius, "swim"), lambda: sprites.tim(player.radius * 1.45, paws=False))
+                if squash > .02 or abs(lean) > .05:
+                    hull = pygame.transform.smoothscale(hull, (max(1, round(hull.get_width() * (1 - .13 * squash))),
+                                                               max(1, round(hull.get_height() * (1 + .2 * squash - .1 * abs(lean))))))
+                self.stamp(surface, hull, player.pos, player.heading + whirl)
+                if squash > .02:
+                    head = pygame.transform.smoothscale(head, (max(1, round(head.get_width() * (1 + .28 * squash))), max(1, round(head.get_height() * (1 - .22 * squash)))))
+                if abs(lean) > .03 or spin > 0:
+                    head = pygame.transform.rotozoom(head, -math.degrees(lean * .26 + whirl), 1)
+                self.stamp(surface, head, player.pos - forward * 2 * unit + side * lean * 4 * unit)
             if player.invulnerability > 0:
                 pygame.draw.circle(surface, sprites.CREAM, player.pos, player.radius * 2.5, max(1, round(3 * unit)))
             tag = player.pos + pygame.Vector2(0, -player.radius * 2 - 14 * unit)
@@ -1092,6 +1184,10 @@ class Game:
                 radius = effect.end.x * (1 - effect.lifetime / (.35 if effect.kind == "splash" else .3))
                 pygame.draw.circle(surface, sprites.WHITE if effect.kind == "splash" else sprites.BUTTER, effect.start,
                                    max(1, round(radius)), max(1, round(5 * unit)))
+        juice.draw_over(surface)
+        juice.draw_ghosts(surface, self.portrait)
+        juice.present(surface, screen)
+        surface = screen
         goal = self.setting("winning_score", 5)
         group = (46 + goal * 22) * unit
         left = self.width / 2 - (len(self.players) * group + (len(self.players) - 1) * 34 * unit) / 2
@@ -1105,13 +1201,20 @@ class Game:
                 center = (x + (50 + point * 22) * unit, y)
                 pygame.draw.circle(surface, INK, center, 9 * unit)
                 pygame.draw.circle(surface, color if point < self.scores[player.player_id] else sprites.WHITE, center, 6.5 * unit)
-        if self.blocked or self.phase != "playing":
+            if player.powerup:
+                pop = juice.pops.get(player.player_id, 0)
+                slot = (x + 15 * unit, y + 34 * unit)
+                if pop > 0:
+                    pygame.draw.circle(surface, color, slot, (16 + 26 * (1 - pop)) * unit, max(1, round(5 * unit * pop)))
+                grown = round(1 + 1.1 * pop * pop, 1)
+                self.stamp(surface, self.sprite(("slot", player.powerup, grown), lambda: sprites.pickup(11 * unit * grown, player.powerup)), slot)
+        if self.blocked:
             box = pygame.FRect(self.width * .15, self.height * .38, self.width * .7, self.height * .22)
             pygame.draw.rect(surface, sprites.CREAM, box, border_radius=max(1, round(22 * unit)))
             pygame.draw.rect(surface, INK, box, max(1, round(4 * unit)), border_radius=max(1, round(22 * unit)))
-            message = self.error if self.blocked else (f"PLAYER {self.winner} WINS!" if self.winner is not None else "DRAW")
-            fill = COLORS[self.winner - 1] if self.winner is not None and not self.blocked else sprites.BUTTER
-            self.text(surface, message, (self.width / 2, self.height * .45), 58, fill, centered=True, tilt=2)
-            subtitle = "Erase or move a physical obstacle" if self.blocked else (
-                "First to five! Return to lobby to play again" if self.phase == "match_over" else f"Next round in {max(1, math.ceil(self.round_timer))}")
-            self.text(surface, subtitle, (self.width / 2, self.height * .55), 26, centered=True)
+            self.text(surface, self.error, (self.width / 2, self.height * .45), 44, sprites.BUTTER, centered=True)
+            self.text(surface, "Erase or move a physical obstacle", (self.width / 2, self.height * .55), 26, centered=True)
+        elif self.phase != "playing":
+            if juice.banner is None:
+                juice.banner, juice.banner_age = (f"PLAYER {self.winner}!" if self.winner else "DRAW!", juice.color(self.winner), self.phase == "match_over"), 1.0
+            juice.draw_banner(surface, self)

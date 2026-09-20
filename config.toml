@@ -70,7 +70,9 @@ shape_gap = 5 # Smallest gap-bridging radius tried when looking for enclosures.
 shape_min_area = 1200 # An arena below about a canoe's size is not worth filling.
 shape_closure = 0.70 # A gap may be this fraction of a shape's extent and still close it.
 shape_max_fraction = 0.25
-round_delay = 3.0
+round_delay = 2.2
+hit_stop = 0.09
+knockback = 560.0
 seed = 2026
 
 [feedback]

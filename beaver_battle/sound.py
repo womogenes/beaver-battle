@@ -66,12 +66,15 @@ def build():
     """Every effect as a float array in [-1, 1], keyed by the names game.py emits."""
     return {
         "shoot": mix(sweep(.13, 980, 260) * decay(.13, 24) * .8, noise(.05, 2) * decay(.05, 70) * .5),
-        "hit": mix(sweep(.2, 420, 150, "square") * decay(.2, 13) * .7, noise(.04, 4) * decay(.04, 60) * .7,
-                   after(.09, sweep(.22, 300, 520) * decay(.22, 12) * .45)),
+        "hit": mix(sweep(.28, 130, 38) * decay(.28, 9) * 1.2, noise(.07, 3, 11) * decay(.07, 32) * 1.0,
+                   sweep(.16, 520, 120, "square") * decay(.16, 15) * .6, noise(.2, 30, 12) * decay(.2, 12) * .6,
+                   after(.07, sweep(.2, 300, 560) * decay(.2, 13) * .35)),
         "splash": splash(),
         "thud": mix(sweep(.11, 190, 80) * decay(.11, 26), noise(.04, 12) * decay(.04, 60) * .5),
         "crack": mix(noise(.22, 5, 4) * decay(.22, 16), sweep(.16, 240, 70) * decay(.16, 18) * .7),
-        "pickup": notes((660, 880, 1320), .11) * .7,
+        "pickup": mix(sweep(.05, 300, 1500) * decay(.05, 30), after(.03, notes((784, 1047, 1568), .1) * .7)),
+        "charm": sweep(.2, 500, 1100) * decay(.2, 9, .03) * .35,
+        "whoosh": noise(.5, 24, 14) * np.sin(np.pi * span(.5) / .5) ** 2 * .6,
         "powerup": sweep(.32, 330, 1320, "square") * decay(.32, 6, .02) * .45,
         "laser": mix(sweep(.3, 2100, 240, "saw") * decay(.3, 9) * .4, sweep(.3, 1050, 120) * decay(.3, 9) * .5),
         "ram": mix(sweep(.16, 260, 70, "square") * decay(.16, 16) * .7, noise(.12, 6, 2) * decay(.12, 24) * .8),

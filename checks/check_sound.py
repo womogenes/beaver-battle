@@ -56,7 +56,7 @@ game.hit(target)
 assert game.sounds == ["hit"] and target.state == "beaver"
 target.invulnerability = 0
 game.hit(target)
-assert game.sounds == ["hit", "splash"] and target.state == "eliminated"
+assert game.sounds[:3] == ["hit", "splash", "whoosh"] and target.state == "eliminated"
 
 # Undrained sounds stay bounded.
 game.sounds.extend(["bump"] * 500)

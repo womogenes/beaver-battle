@@ -339,6 +339,9 @@ def main():
             if mode == 'game':
                 accumulator += dt
                 while accumulator >= 1 / 60:
+                    if game.held(1 / 60) is True:
+                        accumulator -= 1 / 60
+                        continue
                     events = game.update(1 / 60, inputs, walls)
                     if isinstance(game.sounds, list):
                         board.play(game.sounds)
