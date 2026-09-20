@@ -735,11 +735,11 @@ def main():
                 inputs = simulated_inputs(config, elapsed, None, (False, False), active_ids)
             else:
                 bridge.poll(now)
+                active_ids = bridge.active_ids(now)
+                scheduler.update(now, bridge, vision, mode != 'calibration')
                 snapshot = vision.snapshot()
                 walls = snapshot.walls
                 inputs = bridge.inputs(snapshot, now)
-                active_ids = bridge.active_ids(now)
-                scheduler.update(now, bridge, vision, mode != 'calibration')
                 bridge.send(now)
                 args.simulate = not active_ids
                 if args.simulate:

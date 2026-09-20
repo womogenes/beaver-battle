@@ -12,7 +12,8 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import cv2
 import numpy as np
 
-from beaver_battle.game import closed_shapes, link_strokes, mend_breaks
+from beaver_battle.game import (closed_shapes, link_strokes, link_strokes_patch,
+                               mend_breaks, stroke_ends, stroke_ends_patch)
 from checks.board_shapes import CASES, HEIGHT, WIDTH, arc, blank
 
 MIN_AREA = 1200
@@ -181,12 +182,35 @@ def check_cost():
     assert spent < .040, f"Enclosure search must stay affordable at the wall rate, took {spent*1000:.0f} ms"
 
 
+def check_cropped_geometry():
+    """Skipping empty water must preserve repairs, board coordinates and edge ink."""
+    edge = blank()
+    cv2.line(edge, (0, 0), (80, 0), 1, 3)
+    cv2.line(edge, (110, 0), (160, 0), 1, 3)
+    cv2.line(edge, (WIDTH - 1, HEIGHT - 1), (WIDTH - 80, HEIGHT - 1), 1, 3)
+    masks = [blank(), edge] + [build() for name, build, want, why in CASES]
+    for mask in masks:
+        ink = mask.astype(np.uint8)
+        found, expected = [], []
+        cropped = link_strokes(ink.astype(bool), 70, thickness=7, record=found)
+        full = link_strokes_patch(ink, 70, 40, 7, expected)
+        assert np.array_equal(cropped, full), "Cropping changed a repaired stroke"
+        assert found == expected, "Bridge coordinates must remain in board pixels"
+        ends = stroke_ends(ink)
+        full_ends = stroke_ends_patch(ink, 15, 25)
+        assert len(ends) == len(full_ends)
+        for (point, heading), (full_point, full_heading) in zip(ends, full_ends):
+            assert point == full_point, "Endpoint coordinates must remain in board pixels"
+            assert np.allclose(heading, full_heading, atol=2e-4)
+
+
 check_cases()
 check_stroke_linking()
 check_everything_solid_is_drawn()
 check_gap_is_judged_against_size()
 check_filled_body_is_solid()
 check_edge_and_size_limits()
+check_cropped_geometry()
 check_cost()
 print(f"Shape checks passed: {len(CASES)} whiteboard cases, broken strokes rejoined, "
       "everything solid is drawn, gap judged against shape size, solid fills, "

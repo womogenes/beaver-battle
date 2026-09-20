@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, current_thread
 from time import monotonic
 from types import MappingProxyType
 
@@ -371,7 +371,9 @@ def obstacles(warped, reference, gain, canvas, threshold=OBSTACLE_THRESHOLD,
     """
     expected = cv2.GaussianBlur(expected_board(reference, gain, canvas), (0, 0), blur)
     observed = cv2.GaussianBlur(warped.astype(np.float32), (0, 0), blur)
-    deficit = np.max(expected - observed, axis=2)
+    difference = expected - observed
+    blue, green, red = cv2.split(difference)
+    deficit = cv2.max(cv2.max(blue, green), red)
     mask = (deficit > float(threshold)).astype(np.uint8)
     count, labels, stats, centers = cv2.connectedComponentsWithStats(mask, 8)
     keep = np.zeros(count, bool)
@@ -385,6 +387,12 @@ class WallFilter:
     persistence: int = 3
     evidence: np.ndarray | None = None
     mask: np.ndarray | None = None
+    published: np.ndarray | None = None
+
+    def snapshot(self):
+        if self.published is None or not np.array_equal(self.mask, self.published):
+            self.published = readonly(self.mask)
+        return self.published
 
     def update(self, dark):
         limit = max(1, min(127, int(self.persistence)))
@@ -395,14 +403,14 @@ class WallFilter:
                                  np.minimum(self.evidence, 0) - 1).clip(-limit, limit)
         self.mask[self.evidence >= limit] = True
         self.mask[self.evidence <= -limit] = False
-        return readonly(self.mask)
+        return self.snapshot()
 
     def seed(self, mask):
         """Adopt a scan outright; a calibration board read needs no repeat confirmation."""
         limit = max(1, min(127, int(self.persistence)))
         self.evidence = np.where(mask, limit, -limit).astype(np.int16)
         self.mask = np.array(mask, dtype=bool)
-        return readonly(self.mask)
+        return self.snapshot()
 
 
 @dataclass
@@ -515,6 +523,9 @@ class Vision:
     lock: object = field(default_factory=Lock, init=False)
     stopping: Event = field(default_factory=Event, init=False)
     frame_ready: Event = field(default_factory=Event, init=False)
+    wall_ready: Event = field(default_factory=Event, init=False)
+    wall_job: object = field(default=None, init=False)
+    wall_thread: Thread | None = field(default=None, init=False)
     calibration_requested: Event = field(default_factory=Event, init=False)
     calibration_generation: int = field(default=0, init=False)
     tracking_reset: Event = field(default_factory=Event, init=False)
@@ -616,6 +627,8 @@ class Vision:
             return
         self.stopping.clear()
         self.frame_ready.clear()
+        self.wall_ready.clear()
+        self.wall_job = None
         self.frame = None
         camera = self.config.get("camera", {})
         self.tracker = LaserTracker(stale_seconds=float(camera.get("stale_seconds", 0.5)),
@@ -623,14 +636,17 @@ class Vision:
                                     max_gate=float(camera.get("laser_max_gate", 180.0)))
         self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
         self.process_thread = Thread(target=self.process_loop, name="vision-process", daemon=True)
+        self.wall_thread = Thread(target=self.wall_loop, name="vision-walls", daemon=True)
         self.capture_thread = Thread(target=self.capture_loop, name="vision-capture", daemon=True)
         self.process_thread.start()
+        self.wall_thread.start()
         self.capture_thread.start()
 
     def stop(self):
         self.stopping.set()
         self.frame_ready.set()
-        for thread in (self.capture_thread, self.process_thread):
+        self.wall_ready.set()
+        for thread in (self.capture_thread, self.process_thread, self.wall_thread):
             if thread is not None:
                 thread.join(timeout=1.5)
         # Capture owns release; do not release a VideoCapture concurrently with read().
@@ -696,8 +712,12 @@ class Vision:
         for player, track in self.tracker.tracks.items():
             if player not in lit:
                 track.valid = False
-        if timestamp - since < settle or not lit:
+        if not lit:
             return {}, {}
+        if timestamp - since < settle:
+            # An unrelated blinking gate must not blank an already-known steady dot.
+            # Continuity can retain an identity here, but cannot create a new one.
+            return self.tracker.update(points, timestamp)
         if len(lit) == 1:
             return self.tracker.update(points, timestamp, next(iter(lit)))
         known = {player for player, track in self.tracker.tracks.items()
@@ -805,18 +825,25 @@ class Vision:
             timestamp, frame = item
             try:
                 snapshot = self.process_frame(frame, timestamp, identity, ready)
-                with self.lock:
-                    if generation != self.calibration_generation:
-                        continue
-                    if self.capture_error:
-                        snapshot = VisionSnapshot(snapshot.timestamp, MappingProxyType({}), MappingProxyType({}),
-                                                  snapshot.walls, snapshot.preview, snapshot.calibrated, self.capture_error)
-                    elif self.calibration_requested.is_set() and snapshot.calibrated:
-                        snapshot = VisionSnapshot(snapshot.timestamp, MappingProxyType({}), MappingProxyType({}),
-                                                  snapshot.walls, snapshot.preview, False, "Show all four calibration markers")
-                    self.latest = snapshot
+                self.publish_snapshot(snapshot, generation)
             except Exception as error:
                 self.report_error(f"Vision failure: {error}", generation=generation)
+
+    def publish_snapshot(self, snapshot, generation):
+        """Both early aims and completed walls obey the same cancellation/error guards."""
+        with self.lock:
+            if generation != self.calibration_generation or self.stopping.is_set():
+                return
+            if snapshot.calibrated and snapshot.walls is not self.walls:
+                snapshot = VisionSnapshot(snapshot.timestamp, snapshot.aims, snapshot.confidence,
+                                          self.walls, snapshot.preview, snapshot.calibrated, snapshot.error)
+            if self.capture_error:
+                snapshot = VisionSnapshot(snapshot.timestamp, MappingProxyType({}), MappingProxyType({}),
+                                          snapshot.walls, snapshot.preview, snapshot.calibrated, self.capture_error)
+            elif self.calibration_requested.is_set() and snapshot.calibrated:
+                snapshot = VisionSnapshot(snapshot.timestamp, MappingProxyType({}), MappingProxyType({}),
+                                          snapshot.walls, snapshot.preview, False, "Show all four calibration markers")
+            self.latest = snapshot
 
     def process_frame(self, frame, timestamp, identity=None, ready_since=0.0):
         """Process one observation; also usable synchronously for synthetic checks."""
@@ -829,19 +856,20 @@ class Vision:
             self.tracking_reset.clear()
         width, height = self.dimensions()
         shape = frame.shape[:2]
-        if self.camera_shape != shape:
-            self.camera_shape = shape
-            self.matrix = None
-            self.tracker.tracks.clear()
-            self.walls = None
-            self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
-            try:
-                self.matrix = load_calibration(camera.get("calibration_file", "calibration.npz"), shape, (height, width))
-                self.calibration_warning = ""
-            except FileNotFoundError:
-                self.calibration_warning = "Calibration required"
-            except (OSError, ValueError, KeyError):
-                self.calibration_warning = "Saved calibration invalid or size changed; recalibrate"
+        with self.lock:
+            if self.camera_shape != shape:
+                self.camera_shape = shape
+                self.matrix = None
+                self.tracker.tracks.clear()
+                self.walls = None
+                self.wall_filter = WallFilter(int(camera.get("wall_persistence", 3)))
+                try:
+                    self.matrix = load_calibration(camera.get("calibration_file", "calibration.npz"), shape, (height, width))
+                    self.calibration_warning = ""
+                except FileNotFoundError:
+                    self.calibration_warning = "Calibration required"
+                except (OSError, ValueError, KeyError):
+                    self.calibration_warning = "Saved calibration invalid or size changed; recalibrate"
         preview = readonly(frame)
         if calibrating:
             clip = float(camera.get("marker_clip_limit", MARKER_CLIP_LIMIT))
@@ -889,37 +917,84 @@ class Vision:
             aims, confidence = self.telemetry_aims(points, timestamp)
         else:
             aims, confidence = self.tracker.update(points, timestamp, identity, ready_since)
+        # Publish this frame's aim before queuing slower physical-wall extraction.
+        worker = current_thread() is self.process_thread
+        if worker:
+            self.publish_snapshot(VisionSnapshot(timestamp, MappingProxyType(aims), MappingProxyType(confidence),
+                                                self.walls, preview, True, self.calibration_warning), generation)
         rate = float(camera.get("wall_update_hz", 10))
-        # A zero rate keeps the calibration board scan and stops re-reading under game art.
+        # A zero rate keeps the calibration scan. One pending wall job replaces older
+        # work, just like capture: expensive geometry never queues a camera backlog.
         if rate > 0 and timestamp >= self.wall_resume and timestamp - self.last_wall_time >= 1 / rate:
-            warped = cv2.warpPerspective(frame, self.matrix, (width, height), borderValue=(255, 255, 255))
-            canvas = self.projection_for(timestamp)
-            predicted = canvas is not None and self.board_reference is not None and self.board_gain is not None
-            surface = under_white(warped, self.board_gain, canvas) if predicted else warped
-            dark = ink_mask(surface, *self.ink_settings())
-            if predicted:
-                dark = dark | obstacles(warped, self.board_reference, self.board_gain,
-                                        canvas, *self.obstacle_settings())
-            with self.lock:
-                if generation != self.calibration_generation:
-                    return self.latest
-                if self.survey_until > 0.0:
-                    # A vote across the whole window, not a verdict per frame.
-                    if self.survey_votes is None or self.survey_votes.shape != dark.shape:
-                        self.survey_votes = np.zeros(dark.shape, np.int32)
-                        self.survey_samples = 0
-                    self.survey_votes += dark
-                    self.survey_samples += 1
-                    if timestamp >= self.survey_until and self.survey_samples >= 3:
-                        share = float(self.config.get("camera", {}).get("survey_share", 0.45))
-                        settled = self.survey_votes >= max(1, int(self.survey_samples * share))
-                        self.walls = self.wall_filter.seed(settled)
-                        self.survey_until = 0.0
-                        self.survey_votes = None
-                    elif self.walls is None:
-                        self.walls = self.wall_filter.update(dark)
-                else:
-                    self.walls = self.wall_filter.update(dark)
-                self.last_wall_time = timestamp
+            job = (frame, timestamp, self.matrix, self.board_reference, self.board_gain,
+                   self.projection_for(timestamp), generation)
+            if worker and self.wall_thread is not None and self.wall_thread.is_alive():
+                with self.lock:
+                    self.wall_job = job
+                    self.last_wall_time = timestamp
+                self.wall_ready.set()
+            else:
+                self.process_walls(*job)
+        with self.lock:
+            if generation != self.calibration_generation:
+                return self.latest
         return VisionSnapshot(timestamp, MappingProxyType(aims), MappingProxyType(confidence),
                               self.walls, preview, True, self.calibration_warning)
+
+    def wall_loop(self):
+        while not self.stopping.is_set():
+            self.wall_ready.wait(timeout=0.2)
+            self.wall_ready.clear()
+            with self.lock:
+                job = self.wall_job
+                self.wall_job = None
+            if job is None or self.stopping.is_set():
+                continue
+            try:
+                self.process_walls(*job)
+                with self.lock:
+                    if (job[-1] != self.calibration_generation or self.calibration_requested.is_set()
+                            or job[2] is not self.matrix or self.stopping.is_set()):
+                        continue
+                    previous = self.latest
+                    # Keep the newest aim/time/error; walls have their own slower cadence.
+                    self.latest = VisionSnapshot(previous.timestamp, previous.aims, previous.confidence,
+                                                 self.walls, previous.preview, previous.calibrated, previous.error)
+            except Exception as error:
+                self.report_error(f"Wall detection failure: {error}", generation=job[-1])
+
+    def process_walls(self, frame, timestamp, matrix, reference, gain, canvas, generation):
+        with self.lock:
+            if (generation != self.calibration_generation or self.calibration_requested.is_set()
+                    or matrix is not self.matrix):
+                return
+        width, height = self.dimensions()
+        warped = cv2.warpPerspective(frame, matrix, (width, height), borderValue=(255, 255, 255))
+        predicted = canvas is not None and reference is not None and gain is not None
+        # Ink only reads red, so do not restore two unused full-resolution channels.
+        surface = under_white(warped[:, :, 2], gain[2], canvas[:, :, 2]) if predicted else warped
+        dark = ink_mask(surface, *self.ink_settings())
+        if predicted:
+            dark = dark | obstacles(warped, reference, gain, canvas, *self.obstacle_settings())
+        with self.lock:
+            if (generation != self.calibration_generation or self.calibration_requested.is_set()
+                    or matrix is not self.matrix):
+                return
+            if self.survey_until > 0.0:
+                # A vote across the whole window, not a verdict per frame.
+                if self.survey_votes is None or self.survey_votes.shape != dark.shape:
+                    self.survey_votes = np.zeros(dark.shape, np.int32)
+                    self.survey_samples = 0
+                self.survey_votes += dark
+                self.survey_samples += 1
+                if timestamp >= self.survey_until and self.survey_samples >= 3:
+                    share = float(self.config.get("camera", {}).get("survey_share", 0.45))
+                    settled = self.survey_votes >= max(1, int(self.survey_samples * share))
+                    self.walls = self.wall_filter.seed(settled)
+                    self.survey_until = 0.0
+                    self.survey_votes = None
+                elif self.walls is None:
+                    self.walls = self.wall_filter.update(dark)
+            else:
+                self.walls = self.wall_filter.update(dark)
+            self.last_wall_time = max(self.last_wall_time, timestamp)

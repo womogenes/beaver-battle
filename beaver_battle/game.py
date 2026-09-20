@@ -145,6 +145,20 @@ def stroke_ends(ink, look=15, min_branch=25):
     an end, so only ends belonging to a branch of at least `min_branch` pixels count. That
     is the difference between a line that stopped and a ragged edge.
     """
+    # Thinning scans every pixel repeatedly. Empty water cannot contribute a stroke,
+    # so retain only the ink and the neighbourhood used to measure its direction.
+    left, top, width, height = cv2.boundingRect(ink)
+    if not width or not height:
+        return []
+    pad = (max(3, int(look)) | 1) // 2 + 1
+    right = min(ink.shape[1], left + width + pad)
+    bottom = min(ink.shape[0], top + height + pad)
+    left, top = max(0, left - pad), max(0, top - pad)
+    ends = stroke_ends_patch(ink[top:bottom, left:right], look, min_branch)
+    return [((x + left, y + top), heading) for (x, y), heading in ends]
+
+
+def stroke_ends_patch(ink, look, min_branch):
     thin = cv2.ximgproc.thinning(ink * 255) > 0
     if not thin.any():
         return []
@@ -234,9 +248,29 @@ def link_strokes(walls, reach=70, min_piece=40, thickness=3, record=None):
     search, over contour points rather than every pixel.
     """
     ink = walls.astype(np.uint8)
+    left, top, width, height = cv2.boundingRect(ink)
+    if not width or not height:
+        return walls
+    # A candidate Voronoi boundary can sit outside the ink's bounds, but each side
+    # must still lie within reach. Keep that margin (and the bridge width) without
+    # distance-transforming the rest of the empty board.
+    pad = max(1, math.ceil(reach) + 2, int(thickness) + 1)
+    right, bottom = min(ink.shape[1], left + width + pad), min(ink.shape[0], top + height + pad)
+    left, top = max(0, left - pad), max(0, top - pad)
+    found = [] if record is not None else None
+    patch = link_strokes_patch(ink[top:bottom, left:right], reach, min_piece, thickness, found)
+    repaired = walls.copy()
+    repaired[top:bottom, left:right] = patch
+    if record is not None:
+        record.extend(((x + left, y + top), (u + left, v + top))
+                      for (x, y), (u, v) in found)
+    return repaired
+
+
+def link_strokes_patch(ink, reach, min_piece, thickness, record):
     count, pieces, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     if count <= 2:
-        return walls
+        return ink
     distance, nearest = cv2.distanceTransformWithLabels(
         1 - ink, cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_CCOMP)
     owner = np.zeros(int(nearest.max()) + 1, np.int32)
@@ -259,7 +293,7 @@ def link_strokes(walls, reach=70, min_piece=40, thickness=3, record=None):
     channel = {(int(key // count), int(key % count)): float(narrowest[key])
                for key in np.nonzero(np.isfinite(narrowest))[0]}
     if not channel:
-        return walls
+        return ink
     wanted = set(index for pair in channel for index in pair
                  if stats[index, cv2.CC_STAT_AREA] >= min_piece)
     outlines = {}

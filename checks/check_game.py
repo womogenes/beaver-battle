@@ -309,5 +309,17 @@ redness = pixels[:, :, 0].astype(np.int16) - pixels[:, :, 1:].max(axis=2).astype
 assert not np.any((pixels[:, :, 0] >= 160) & (redness >= 60))
 if len(sys.argv) > 1:
     pygame.image.save(surface, sys.argv[1])
+# The responsive preset must turn to a fresh laser aim in one physics step,
+# including reversing direction, without retaining rotational interpolation.
+responsive = arena((1,))
+responsive.config['game']['turn_speed'] = 10800
+pilot = responsive.players[1]
+for offset in ((-100, 0), (0, -100), (100, 0), (0, 100)):
+    aim = (pilot.pos.x + offset[0], pilot.pos.y + offset[1])
+    responsive.update(1 / 60, {1: PlayerInput(1, aim=aim)})
+    wanted = math.atan2(offset[1], offset[0])
+    assert abs((pilot.heading - wanted + math.pi) % math.tau - math.pi) < 1e-6
+print('Responsive heading check passed: reversals finish in one physics step')
+
 pygame.quit()
 print("Game checks passed: movement, ammo, lives, feedback, rounds, live walls, closed-shape fills, every weapon and hazard, rendering")

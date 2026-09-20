@@ -25,12 +25,12 @@ def check_acquisition():
     assert observe(vision, [(100, 100)], 1.04) == {}, "Wait for optical settling"
     assert observe(vision, [(100, 100)], 1.1) == {1: (100, 100)}
     vision.set_laser_states({1: True, 2: True}, 1.11)
-    assert observe(vision, [(105, 100), (400, 100)], 1.14) == {}
+    assert observe(vision, [(105, 100), (400, 100)], 1.14) == {1: (105, 100)}, "A known steady dot continues while the other settles"
     assert vision.tracker.tracks[1].valid, "A transition preserves a continuously lit identity"
     assert observe(vision, [(400, 100), (105, 100)], 1.2) == {1: (105, 100), 2: (400, 100)}
     assert observe(vision, [(110, 100), (405, 100)], 1.23) == {1: (110, 100), 2: (405, 100)}
     vision.set_laser_states({1: True, 2: False}, 1.24)
-    assert observe(vision, [(115, 100)], 1.26) == {}
+    assert observe(vision, [(115, 100)], 1.26) == {1: (115, 100)}
     assert not vision.tracker.tracks[2].valid
     assert observe(vision, [(115, 100)], 1.34) == {1: (115, 100)}
     vision.set_laser_states({1: False, 2: False}, 1.35)

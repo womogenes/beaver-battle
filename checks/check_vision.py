@@ -400,10 +400,130 @@ def check_walls():
     solid = walls.update(ink)
     assert np.array_equal(solid, ink)
     assert not solid.flags.writeable
+    assert walls.update(ink) is solid, "Unchanged geometry must reuse its immutable snapshot"
     assert np.array_equal(walls.update(empty), ink), "One bright frame cannot erase physical ink"
     walls.update(empty)
     assert not walls.update(empty).any(), "Erasure must update live geometry"
     assert np.array_equal(solid, ink), "Published wall arrays must not mutate later"
+
+
+def check_early_aims():
+    vision = Vision({"display": {"width": 320, "height": 240}, "camera": {"wall_persistence": 1}})
+    vision.wall_filter = WallFilter(1)
+    frame = np.full((240, 320, 3), 220, np.uint8)
+    cv2.circle(frame, (100, 100), 3, (0, 0, 255), -1)
+    frame[150:180, 180:200] = 0
+    vision.camera_shape = frame.shape[:2]
+    vision.matrix = np.eye(3)
+    vision.set_identity(1, 0)
+    scanning, release, completed = Event(), Event(), Event()
+    original_ink = ink_mask
+
+    def slow_walls(*args):
+        scanning.set()
+        assert release.wait(2)
+        return original_ink(*args)
+
+    process = vision.process_frame
+
+    def observed_process(*args):
+        result = process(*args)
+        completed.set()
+        return result
+
+    vision.process_frame = observed_process
+    with patch("beaver_battle.vision.ink_mask", side_effect=slow_walls):
+        vision.process_thread = Thread(target=vision.process_loop)
+        vision.process_thread.start()
+        try:
+            stamp = monotonic()
+            with vision.lock:
+                vision.frame = (stamp, frame)
+            vision.frame_ready.set()
+            assert scanning.wait(1)
+            assert vision.latest.timestamp == stamp and 1 in vision.latest.aims, \
+                "Fresh aim must publish before wall processing completes"
+            assert vision.latest.walls is None
+            vision.report_error("test capture disconnect", camera_failure=True)
+            release.set()
+            assert completed.wait(1)
+            await_condition(lambda: vision.latest.walls is not None)
+            assert vision.latest.walls[160, 190], "Wall extraction still completes"
+            assert not vision.latest.aims and "disconnect" in vision.latest.error, \
+                "An in-flight completion cannot undo a capture error"
+        finally:
+            release.set()
+            vision.stop()
+
+    vision.stopping.clear()
+    previous = vision.latest
+    snapshot = process(frame, monotonic(), 1, 0)
+    assert vision.latest is previous, "Synchronous processing does not publish"
+    generation = vision.calibration_generation
+    vision.begin_calibration()
+    previous = vision.latest
+    vision.publish_snapshot(snapshot, generation)
+    assert vision.latest is previous, "A superseded generation cannot publish early aims"
+    vision.capture_error = ""
+    vision.publish_snapshot(snapshot, vision.calibration_generation)
+    assert not vision.latest.aims and not vision.latest.calibrated, "Calibration suppresses publication of aims"
+
+
+def check_wall_worker():
+    for cancel in (False, True):
+        vision = Vision({"display": {"width": 320, "height": 240},
+                         "camera": {"wall_persistence": 1, "wall_update_hz": 30}})
+        vision.wall_filter = WallFilter(1)
+        frame = np.full((240, 320, 3), 220, np.uint8)
+        cv2.circle(frame, (100, 100), 3, (0, 0, 255), -1)
+        frame[150:180, 180:200] = 0
+        vision.camera_shape = frame.shape[:2]
+        vision.matrix = np.eye(3)
+        vision.set_identity(1, 0)
+        scanning, release = Event(), Event()
+        jobs = []
+        process = vision.process_walls
+
+        def slow_walls(*args):
+            jobs.append(args[1])
+            if len(jobs) == 1:
+                scanning.set()
+                assert release.wait(2)
+            return process(*args)
+
+        vision.process_walls = slow_walls
+        vision.wall_thread = Thread(target=vision.wall_loop)
+        vision.process_thread = Thread(target=vision.process_loop)
+        vision.wall_thread.start()
+        vision.process_thread.start()
+        try:
+            stamp = monotonic()
+            for index in range(5):
+                moment = stamp + index * 0.05
+                with vision.lock:
+                    vision.frame = (moment, frame)
+                vision.frame_ready.set()
+                await_condition(lambda: vision.latest.timestamp == moment)
+                assert 1 in vision.latest.aims, "New frames publish aims while a wall scan is blocked"
+                if index == 0:
+                    assert scanning.wait(1)
+            assert jobs == [stamp], "Wall work is single-owner with one latest pending slot"
+            if cancel:
+                vision.begin_calibration()
+            release.set()
+            await_condition(lambda: len(jobs) == 2)
+            if cancel:
+                assert vision.walls is None, "An old generation cannot commit walls after calibration begins"
+                assert not vision.latest.calibrated and not vision.latest.aims
+            else:
+                await_condition(lambda: vision.latest.walls is not None)
+                assert vision.latest.timestamp == stamp + 0.2, "Wall completion cannot roll back the newest aim frame"
+                assert jobs == [stamp, stamp + 0.2], "Skipped wall frames never create backlog"
+                assert vision.latest.walls[160, 190]
+        finally:
+            release.set()
+            vision.stop()
+        assert not vision.wall_thread.is_alive() and not vision.process_thread.is_alive()
 
 
 def check_pipeline():
@@ -514,7 +634,8 @@ def check_cancel_calibration():
                 vision.process_frame = process
                 assert process(calibration_image(width, height), cancelled_at + 0.25).walls is old_walls
                 fresh = process(blank, cancelled_at + 0.7)
-                assert fresh.calibrated and fresh.walls is not old_walls, "Wall learning must resume after marker settling"
+                assert fresh.calibrated and vision.last_wall_time == cancelled_at + 0.7, \
+                    "Wall learning resumes after marker settling; unchanged walls reuse the snapshot"
             else:
                 assert vision.matrix is None and not path.exists(), "Cancelled first calibration must remain unavailable"
                 assert "Calibration required" in vision.latest.error
@@ -618,6 +739,8 @@ check_laser_on_a_whiteboard()
 check_identity()
 check_fast_tracking()
 check_walls()
+check_early_aims()
+check_wall_worker()
 check_pipeline()
 check_cancel_calibration()
 check_worker()

@@ -185,6 +185,33 @@ and widening it increases the possibility of a plausible wrong association when
 two indistinguishable dots cross. Reacquisition still needs a solo illumination
 window. Motion blur and the 30 fps capture limit remain physical constraints.
 
-Separately, `game.turn_speed` is now 720 degrees/second rather than 240: with a
-valid stationary aim and no obstacle interference, a 180-degree turn takes 0.25 s
-instead of 0.75 s. These are configured bounds, not measured end-to-end latency.
+Separately, `game.turn_speed` is now 10800 degrees/second: with a valid aim and
+no obstacle interference, any heading change completes in one 60 Hz physics step
+(16.7 ms). This removes rotational easing after detection; it is not a measurement
+of camera-to-projector latency. Earlier presets used 240 and then 720 degrees/second.
+
+
+### Aim latency isolation
+
+The camera and aim workers keep only the latest frame. Physical ink and shadow
+extraction now runs in a separate latest-job worker, so a slow wall scan cannot
+hold up subsequent laser coordinates. Calibration generations reject obsolete
+wall jobs, and immutable, unchanged wall masks retain their identity to avoid
+rebuilding collision geometry unnecessarily. Stroke repair also limits its work
+to the ink bounds plus the search margin; board coordinates and results are
+preserved. Controller gate telemetry is delivered before sampling vision in the
+main loop, and an already tracked steady dot remains available while the other
+controller's gate settles. New identity acquisition still requires settling.
+
+On this Linux laptop, replaying a saved 1280x720 camera frame at 30 Hz with
+projected-art wall updates at 10 Hz published all 90 aim frames: median processing
+to aim publication was 10.54 ms, p90 14.60 ms. Wall jobs separately took a median
+74.26 ms. The earlier combined path took a median 132.19 ms per full wall-update
+frame despite laser detection taking only 6.82 ms. This is a software replay
+measurement, not physical laser-to-projector latency. The Arducam still delivers
+30 frames/second, and projector refresh and exposure contribute additional delay.
+
+A paired 25-sample sparse-board geometry benchmark reduced median collision
+geometry rebuild time from 90.54 to 50.44 ms (p90 98.68 to 53.68 ms). Dense ink
+can still require nearly the whole board; this optimization preserves the full
+search margins rather than changing which gaps become solid.
