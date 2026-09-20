@@ -178,25 +178,34 @@ static void laser_button_test(void)
 #ifdef CONFIG_BB_LASER_IDENTITY_TEST
 static void laser_identity_test(void)
 {
+    Button fire = {0};
+    Button special = {0};
     bool laser = false;
-    uint64_t started = time_ms();
+    uint64_t pressed_at = 0;
     uint64_t next_status_ms = 0;
     TickType_t wake_tick = xTaskGetTickCount();
-    ESP_LOGI(log_tag, "LASER IDENTITY TEST: controller %d, %" PRIu32 " ms period, %d ms gap; no buttons, no Wi-Fi",
+    ESP_LOGI(log_tag, "LASER IDENTITY TEST: controller %d, %" PRIu32 " ms period, %d ms gap; hold GPIO%d to fire; no Wi-Fi",
              CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
-             CONFIG_BB_LASER_IDENTITY_GAP_MS);
+             CONFIG_BB_LASER_IDENTITY_GAP_MS, FIRE_GPIO);
+    ESP_LOGI(log_tag, "LASER GPIO%d OFF", LASER_GPIO);
     while (true) {
         uint64_t now = time_ms();
-        bool requested = laser_identity_level(CONFIG_BB_CONTROLLER_ID,
-                                              CONFIG_BB_LASER_IDENTITY_GAP_MS, now - started);
+        /* Nothing lights the laser but a held button, at power-up or ever. */
+        if (buttons_read(&fire, &special, now) && fire.pressed) {
+            pressed_at = now;   /* the pattern starts where the press does */
+        }
+        bool requested = fire.pressed &&
+            laser_identity_level(CONFIG_BB_CONTROLLER_ID, CONFIG_BB_LASER_IDENTITY_GAP_MS,
+                                 now - pressed_at);
         if (requested != laser) {
             output_update(requested, false);
             laser = requested;
         }
         if (now >= next_status_ms) {
-            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %d ms, laser %s",
+            ESP_LOGI(log_tag, "IDENTITY BLINK: controller %d period %" PRIu32 " ms gap %d ms, FIRE %s, laser %s",
                      CONFIG_BB_CONTROLLER_ID, laser_identity_period_ms(CONFIG_BB_CONTROLLER_ID),
-                     CONFIG_BB_LASER_IDENTITY_GAP_MS, laser ? "ON" : "OFF");
+                     CONFIG_BB_LASER_IDENTITY_GAP_MS, fire.pressed ? "HELD" : "released",
+                     laser ? "ON" : "OFF");
             next_status_ms = now + 2000;
         }
         vTaskDelayUntil(&wake_tick, pdMS_TO_TICKS(LOOP_MS));

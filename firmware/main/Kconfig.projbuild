@@ -40,11 +40,12 @@ config BB_LASER_IDENTITY_TEST
     depends on !BB_LASER_BUTTON_TEST && !BB_SERVO_BUTTON_TEST
     default n
     help
-        Drive the laser continuously with this controller's identity blink: lit
-        except for one gap of BB_LASER_IDENTITY_GAP_MS at the start of every
-        period, where the period is 600, 800 or 1000 ms for controller 1, 2 or 3.
-        The camera identifies a controller from how often the gap comes round.
-        No buttons, no Wi-Fi. Disable and rebuild to restore game operation.
+        Hold FIRE to blink this controller's identity pattern: lit except for one
+        gap of BB_LASER_IDENTITY_GAP_MS at the start of every period, where the
+        period is 600, 800 or 1000 ms for controller 1, 2 or 3. The camera
+        identifies a controller from how often the gap comes round. The laser is
+        dark at power-up and whenever the button is released. No Wi-Fi, servo
+        disabled. Disable and rebuild to restore game operation.
 
 config BB_LASER_IDENTITY_GAP_MS
     int "Identity blink gap (milliseconds)"

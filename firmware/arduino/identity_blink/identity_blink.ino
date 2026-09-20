@@ -1,16 +1,21 @@
 // Identity blink bench test, for testing camera detection without ESP-IDF.
 //
-// This is the same pattern as laser_identity_level() in ../../main/controller.c, and the
-// two must agree: the laser is lit except for one gap of GAP_MS at the start of every
-// period, and the period identifies the controller. Change CONTROLLER_ID per board.
+// The laser blinks this controller's identity pattern only while FIRE is held, and is off
+// at every other moment including power-up. Holding a button is the only thing that ever
+// lights it, which is what the ESP-IDF bench mode does too.
 //
-// Board: "ESP32 Dev Module". Nothing else is driven: no Wi-Fi, no servo, no buttons.
-// The full game firmware is ESP-IDF and does not build under Arduino; this sketch exists
-// only so the blink can be put on the board and measured.
+// The pattern mirrors laser_identity_level() in ../../main/controller.c, and the button
+// mirrors button_update(). Both are checked against the C originals by checks/check_blink.py,
+// so the sketch and the firmware cannot drift apart unnoticed.
+//
+// Board: "ESP32 Dev Module". No Wi-Fi, no servo. The full game firmware is ESP-IDF and
+// does not build under Arduino; this sketch exists only to put the blink on a board.
 
-const int CONTROLLER_ID = 1;   // 1, 2 or 3, unique per controller
-const int LASER_GPIO = 25;     // gate of the laser MOSFET, as in the ESP-IDF firmware
-const uint32_t GAP_MS = 133;   // four frames at 30 fps
+const int CONTROLLER_ID = 1;      // 1, 2 or 3, unique per controller
+const int LASER_GPIO = 25;        // gate of the laser MOSFET, as in the ESP-IDF firmware
+const int FIRE_GPIO = 27;         // CONFIG_BB_FIRE_GPIO; switch connects the pin to GND
+const uint32_t GAP_MS = 133;      // four frames at 30 fps
+const uint32_t DEBOUNCE_MS = 15;  // BUTTON_DEBOUNCE_MS in controller.h
 
 // 600, 800 and 1000 are in the ratio 3:4:5, so no period is a harmonic of another and a
 // camera cannot mistake one for a multiple of the next.
@@ -34,23 +39,49 @@ bool identityLevel(int controllerId, uint32_t gapMs, uint32_t elapsedMs) {
   return (elapsedMs % period) >= gapMs;
 }
 
-uint32_t started = 0;
+// The same settle rule as button_update() in controller.c. Kept as a member so the
+// Arduino preprocessor cannot hoist a prototype above the type it mentions.
+struct Button {
+  bool pressed = false;
+  bool candidate = false;
+  uint32_t changedMs = 0;
+
+  bool update(bool nowPressed, uint32_t nowMs) {
+    if (nowPressed != candidate) {
+      candidate = nowPressed;
+      changedMs = nowMs;
+    }
+    if (pressed != candidate && nowMs - changedMs >= DEBOUNCE_MS) {
+      pressed = candidate;
+      return true;
+    }
+    return false;
+  }
+};
+
+Button fire;
+uint32_t pressedAt = 0;
 bool lit = false;
 
 void setup() {
   Serial.begin(115200);
   pinMode(LASER_GPIO, OUTPUT);
-  digitalWrite(LASER_GPIO, LOW);   // laser starts off, as the real firmware does
-  started = millis();
-  Serial.printf("identity blink: controller %d, period %u ms, gap %u ms, laser on GPIO%d\n",
-                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), GAP_MS, LASER_GPIO);
+  digitalWrite(LASER_GPIO, LOW);      // dark at power-up, and until FIRE is held
+  pinMode(FIRE_GPIO, INPUT_PULLUP);   // switch pulls the pin to GND when pressed
+  Serial.printf("identity blink: controller %d, period %u ms, gap %u ms; hold GPIO%d to fire\n",
+                CONTROLLER_ID, identityPeriodMs(CONTROLLER_ID), GAP_MS, FIRE_GPIO);
 }
 
 void loop() {
-  bool wanted = identityLevel(CONTROLLER_ID, GAP_MS, millis() - started);
+  uint32_t now = millis();
+  if (fire.update(digitalRead(FIRE_GPIO) == LOW, now) && fire.pressed) {
+    pressedAt = now;   // the pattern starts where the press does, so its phase is known
+  }
+  bool wanted = fire.pressed && identityLevel(CONTROLLER_ID, GAP_MS, now - pressedAt);
   if (wanted != lit) {
     digitalWrite(LASER_GPIO, wanted ? HIGH : LOW);
     lit = wanted;
+    Serial.printf("laser %s\n", lit ? "ON" : "off");
   }
   delay(2);   // well inside the 133 ms gap, so edges land within a frame
 }
