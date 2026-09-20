@@ -249,10 +249,10 @@ needs no gap in order to be recognised is better off without one: it is the dot 
 periodic gaps, and it keeps all of its light for tracking. That also leaves only two blink
 patterns to tell apart rather than three, and 800 against 1000 was already the easier pair.
 
-Identification is therefore: no periodicity and the highest duty is controller 1, gaps
-every 800 ms is controller 2, every 1000 ms is controller 3. The duty matters as well as
-the periodicity, because a controller whose gaps are being missed looks steady, and only
-its lower share of lit frames tells it apart from a laser that never blinks at all.
+With two players the question is only whether the gaps come round at all: steady is
+controller 1, gaps every 800 ms is controller 2. Duty matters as well as periodicity,
+because a controller whose gaps are being missed looks steady too, and only its lower
+share of lit frames tells it apart from a laser that never blinks.
 
 For controllers 2 and 3 the gap is 22 percent of the period, so 176 and 220 ms, and
 `BB_LASER_IDENTITY_GAP_MS` overrides it only if set above zero. A single fixed gap gave the

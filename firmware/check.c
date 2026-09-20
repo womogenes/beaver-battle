@@ -21,9 +21,7 @@ int main(void)
     /* Identity blink: lit except for one gap per period, unique period per controller. */
     assert(laser_identity_period_ms(1) == 600);
     assert(laser_identity_period_ms(2) == 800);
-    assert(laser_identity_period_ms(3) == 1000);
-    assert(laser_identity_period_ms(9) == 600);
-    for (int id = 1; id <= 3; id++) {
+    for (int id = 1; id <= 2; id++) {
         uint32_t period = laser_identity_period_ms(id);
         assert(!laser_identity_level(id, 133, 0));
         assert(!laser_identity_level(id, 133, 132));
@@ -49,8 +47,7 @@ int main(void)
         assert(laser_identity_level(1, laser_identity_gap_ms(1), ms));
     }
     assert(laser_identity_gap_ms(2) == 176);
-    assert(laser_identity_gap_ms(3) == 220);
-    for (int id = 2; id <= 3; id++) {
+    for (int id = 2; id <= 2; id++) {
         uint32_t period = laser_identity_period_ms(id);
         uint32_t gap = laser_identity_gap_ms(id);
         int dark = 0;

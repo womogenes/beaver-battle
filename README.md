@@ -60,7 +60,7 @@ device = 0
 wall_threshold = 75
 
 [game]
-players = 3
+players = 2
 shot_interval = 0.30
 reload_seconds = 2.5
 ```

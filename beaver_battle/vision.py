@@ -439,7 +439,7 @@ class LaserTracker:
         if timestamp < ready_since:
             return aims, confidence
         if identity is not None:
-            if identity in (1, 2, 3) and len(points) == 1:
+            if identity in (1, 2) and len(points) == 1:
                 self.accept(identity, points[0], timestamp, identified=True)
                 aims[identity] = tuple(points[0])
                 confidence[identity] = 1.0
@@ -640,8 +640,8 @@ class Vision:
         return snapshot
 
     def set_identity(self, player_id, ready_since):
-        if player_id is not None and player_id not in (1, 2, 3):
-            raise ValueError("Player identity must be 1, 2, 3, or None")
+        if player_id is not None and player_id not in (1, 2):
+            raise ValueError("Player identity must be 1, 2, or None")
         with self.lock:
             self.identity = player_id
             self.identity_ready = float(ready_since)

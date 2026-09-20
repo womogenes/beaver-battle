@@ -1,6 +1,6 @@
 # Controller protocol v1
 
-UDP JSON on laptop port 4210. Configure the laptop IPv4 address, Wi-Fi SSID, password, and controller ID in firmware build settings; do not commit credentials. MIT may assign different subnets, so use explicit laptop IP instead of assuming broadcast discovery. Controllers bind an ephemeral UDP port; laptop replies to the source endpoint. IDs are 1, 2, 3.
+UDP JSON on laptop port 4210. Configure the laptop IPv4 address, Wi-Fi SSID, password, and controller ID in firmware build settings; do not commit credentials. MIT may assign different subnets, so use explicit laptop IP instead of assuming broadcast discovery. Controllers bind an ephemeral UDP port; laptop replies to the source endpoint. IDs are 1 and 2.
 
 Controller sends immediately after a debounced button change and every 20 ms:
 

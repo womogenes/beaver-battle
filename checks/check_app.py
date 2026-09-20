@@ -32,7 +32,7 @@ class Scenario:
     done: bool = False
     calibrated: bool = True
     fresh: bool = True
-    active: list = field(default_factory=lambda: [1, 2, 3])
+    active: list = field(default_factory=lambda: [1, 2])
     buttons: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
     checkpoint: int = 0
@@ -190,7 +190,7 @@ def main():
     for method in ('keyboard', 'controller'):
         Scenario(calibration_cancel, method).run()
 
-    bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '3'], active=[])
+    bench = Scenario(bench_autostart, argv=['beaver-battle', '--calibrate', '--bench', '2'], active=[])
     bench.run()
     modes = [mode for mode, elapsed in bench.history]
     assert modes == ['calibration', 'countdown', 'game'], modes

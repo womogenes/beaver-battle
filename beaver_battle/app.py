@@ -34,8 +34,8 @@ def load_config(path):
                 raise ValueError(f'{group}.{key} must be between 320 and 4096')
     config['game']['width'] = config['display']['width']
     config['game']['height'] = config['display']['height']
-    if not 2 <= config['game']['players'] <= 3:
-        raise ValueError('game.players must be 2 or 3')
+    if config['game']['players'] != 2:
+        raise ValueError('game.players must be 2')
     if not 1 <= config['network']['port'] <= 65535:
         raise ValueError('network.port must be between 1 and 65535')
     return config
@@ -71,7 +71,7 @@ def simulated_walls(width, height):
 
 def menu_choices(mode):
     if mode == 'lobby':
-        return ['Start 2-player match', 'Start 3-player match', 'Calibrate board', 'Quit']
+        return ['Start match', 'Calibrate board', 'Quit']
     return ['Resume', 'New match', 'Calibrate board', 'Quit']
 
 
@@ -114,10 +114,10 @@ def main():
     parser.add_argument('--list-displays', action='store_true', help='list connected outputs without starting camera or controllers')
     parser.add_argument('--list-cameras', action='store_true', help='probe camera indices without opening a window')
     parser.add_argument('--camera', type=int, help='camera device index from --list-cameras')
-    parser.add_argument('--bench', type=int, choices=(2, 3), metavar='N',
+    parser.add_argument('--bench', type=int, choices=(2,), metavar='N',
                         help='real camera, calibration and board drawings with N bot canoes and no controllers')
     parser.add_argument('--display-test', action='store_true', help='show colors, edge border, and motion without camera or controllers; Esc exits')
-    parser.add_argument('--players', type=int, choices=(2, 3))
+    parser.add_argument('--players', type=int, choices=(2,))
     parser.add_argument('--mouse', action='store_true', help='in simulation, control player 1 with mouse; left fires, right uses power-up')
     args = parser.parse_args()
     config = load_config(args.config)
@@ -294,7 +294,7 @@ def main():
                     elif choice == 'New match':
                         mode, selection = 'lobby', 0
                     else:
-                        count = 2 if '2-player' in choice else 3
+                        count = 2
                         if len(active_ids) < count:
                             menu_message = f'Waiting for {count} controllers; {len(active_ids)} connected.'
                         elif not args.simulate and not snapshot.calibrated:

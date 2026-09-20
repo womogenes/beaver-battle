@@ -47,7 +47,7 @@ port = 4210
 timeout = 0.5
 
 [game]
-players = 3
+players = 2
 width = 1280
 height = 720
 canoe_speed = 240.0
